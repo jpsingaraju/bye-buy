@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey, Integer
+from sqlalchemy import String, Float, DateTime, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional
 
@@ -16,6 +16,8 @@ class Conversation(Base):
     )
     fb_thread_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")
+    agreed_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    delivery_address: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     last_message_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )

@@ -17,23 +17,26 @@ class AIResponse:
     message: str
     deal_status: str = "none"
     agreed_price: Optional[float] = None
+    delivery_address: Optional[str] = None
 
 
 async def generate_response(
     listing,
     messages: list,
+    conversation_status: str = "active",
 ) -> AIResponse | None:
     """Generate an AI response for a conversation.
 
     Args:
         listing: The Listing model instance (or None if unmatched).
         messages: List of Message model instances (full conversation history).
+        conversation_status: Current conversation status (e.g. "pending_address").
 
     Returns:
         AIResponse with message text and deal status, or None on failure.
     """
     client = get_openai_client()
-    system_prompt = build_system_prompt(listing)
+    system_prompt = build_system_prompt(listing, conversation_status)
     chat_history = build_message_history(messages)
 
     try:
@@ -70,6 +73,7 @@ def _parse_response(raw: str) -> AIResponse:
             message=data.get("message", raw),
             deal_status=data.get("deal_status", "none"),
             agreed_price=data.get("agreed_price"),
+            delivery_address=data.get("delivery_address"),
         )
     except (json.JSONDecodeError, KeyError):
         logger.warning(f"Failed to parse AI JSON, using raw: {raw[:100]}")

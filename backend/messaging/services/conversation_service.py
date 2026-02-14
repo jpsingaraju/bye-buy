@@ -92,6 +92,28 @@ class ConversationService:
         return conversation
 
     @staticmethod
+    async def save_deal_details(
+        session: AsyncSession,
+        conversation_id: int,
+        agreed_price: float | None = None,
+        delivery_address: str | None = None,
+    ) -> Conversation | None:
+        """Save deal details (agreed price and/or delivery address)."""
+        result = await session.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
+        )
+        conversation = result.scalar_one_or_none()
+        if not conversation:
+            return None
+        if agreed_price is not None:
+            conversation.agreed_price = agreed_price
+        if delivery_address is not None:
+            conversation.delivery_address = delivery_address
+        await session.commit()
+        await session.refresh(conversation)
+        return conversation
+
+    @staticmethod
     async def add_message(
         session: AsyncSession,
         conversation_id: int,

@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     listing_id INTEGER,
     fb_thread_id TEXT,
     status TEXT NOT NULL DEFAULT 'active',
+    agreed_price REAL,
+    delivery_address TEXT,
     last_message_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (buyer_id) REFERENCES buyers(id),

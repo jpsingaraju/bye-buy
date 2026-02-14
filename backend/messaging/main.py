@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
 
     await seed_default_listings()
+    await monitor.start()
     logger.info("Messaging service started")
     yield
 

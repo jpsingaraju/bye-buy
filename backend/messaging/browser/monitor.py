@@ -17,6 +17,7 @@ from .actions import (
     click_conversation,
     send_message as browser_send_message,
     close_chat_popup,
+    close_all_chat_popups,
 )
 from ..ai.responder import generate_response
 
@@ -32,6 +33,7 @@ class MessageMonitor:
         self.last_poll_at: datetime | None = None
         self.recent_errors: deque[str] = deque(maxlen=20)
         self._task: asyncio.Task | None = None
+        self._navigated = False
 
     async def start(self):
         """Start the monitoring loop."""
@@ -63,6 +65,7 @@ class MessageMonitor:
 
                 # Session break every N cycles
                 if self.cycle_count % settings.session_break_cycles == 0:
+                    self._navigated = False
                     break_time = random.uniform(
                         settings.session_break_min, settings.session_break_max
                     )
@@ -81,15 +84,21 @@ class MessageMonitor:
                 error_msg = f"Poll cycle error: {e}"
                 logger.error(error_msg)
                 self.recent_errors.append(error_msg)
+                self._navigated = False
                 await asyncio.sleep(settings.poll_interval_max)
 
     async def _poll_cycle(self):
         """Single poll cycle: check conversations and respond."""
         session = await get_stagehand_session()
 
-        # Navigate to marketplace inbox
-        if not await navigate_to_marketplace(session):
-            return
+        # Navigate to marketplace inbox (only on first cycle or after reset)
+        if not self._navigated:
+            if not await navigate_to_marketplace(session):
+                return
+            self._navigated = True
+
+        # Close any stray chat popups before extracting
+        await close_all_chat_popups(session)
 
         # Extract conversation list
         conversations = await extract_conversation_list(session)
@@ -119,7 +128,7 @@ class MessageMonitor:
             return
 
         # Extract messages from the chat popup
-        conv_data = await extract_chat_messages(browser_session)
+        conv_data = await extract_chat_messages(browser_session, buyer_name)
         logger.info(
             f"Chat popup for {buyer_name}: {len(conv_data.messages)} messages, "
             f"listing='{conv_data.listing_title}'"
@@ -186,7 +195,7 @@ class MessageMonitor:
                     "Hey, sorry but this item has already been sold! Thanks for "
                     "your interest though."
                 )
-                sent = await browser_send_message(browser_session, response_text)
+                sent = await browser_send_message(browser_session, response_text, buyer_name)
                 await ConversationService.add_message(
                     db,
                     conversation_id=conversation.id,
@@ -207,6 +216,7 @@ class MessageMonitor:
             ai_result = await generate_response(
                 listing=listing,
                 messages=all_messages,
+                conversation_status=conversation.status,
             )
 
             if not ai_result:
@@ -220,7 +230,7 @@ class MessageMonitor:
             )
 
             # Send AI response via chat popup
-            sent = await browser_send_message(browser_session, ai_result.message)
+            sent = await browser_send_message(browser_session, ai_result.message, buyer_name)
             logger.info(f"Message send {'succeeded' if sent else 'FAILED'} for {buyer_name}")
 
             # Save seller message
@@ -238,15 +248,38 @@ class MessageMonitor:
                     listing.price if listing else 0
                 )
                 logger.info(
-                    f"DEAL REACHED: {listing.title if listing else 'Unknown'} - "
+                    f"DEAL AGREED (awaiting address): "
+                    f"{listing.title if listing else 'Unknown'} - "
                     f"Buyer: {buyer_name} - ${agreed_price}"
                 )
-                await ConversationService.update_status(
-                    db, conversation.id, "sold"
+                await ConversationService.save_deal_details(
+                    db, conversation.id, agreed_price=agreed_price
                 )
-                if listing:
-                    listing.status = "sold"
-                    await db.commit()
+                await ConversationService.update_status(
+                    db, conversation.id, "pending_address"
+                )
+
+            elif ai_result.deal_status == "address_received":
+                delivery_address = ai_result.delivery_address
+                if delivery_address:
+                    logger.info(
+                        f"ADDRESS RECEIVED: "
+                        f"{listing.title if listing else 'Unknown'} - "
+                        f"Buyer: {buyer_name} - Address: {delivery_address}"
+                    )
+                    await ConversationService.save_deal_details(
+                        db, conversation.id, delivery_address=delivery_address
+                    )
+                    await ConversationService.update_status(
+                        db, conversation.id, "sold"
+                    )
+                    if listing:
+                        listing.status = "sold"
+                        await db.commit()
+                else:
+                    logger.warning(
+                        f"address_received but no address extracted for {buyer_name}"
+                    )
 
             elif ai_result.deal_status == "needs_review":
                 logger.info(
