@@ -14,7 +14,10 @@ import asyncio
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from browserbase import Browserbase
+
+load_dotenv(Path(__file__).parent / ".env")
 
 API_KEY = os.environ.get("BROWSERBASE_API_KEY", "")
 PROJECT_ID = os.environ.get("BROWSERBASE_PROJECT_ID", "")
@@ -48,7 +51,7 @@ async def main():
 
     print("\nStep 3: Getting Live View URL...")
     debug_info = bb.sessions.debug(session_id)
-    live_view_url = debug_info.debugger_live_url
+    live_view_url = debug_info.debugger_url
 
     print(f"\n{'='*60}")
     print("OPEN THIS URL IN YOUR BROWSER:")
