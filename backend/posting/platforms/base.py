@@ -27,16 +27,8 @@ class PlatformPoster(ABC):
         description: str,
         price: float,
         image_paths: list[str],
+        condition: str = "good",
+        location: str | None = None,
     ) -> PostingResult:
-        """Post a listing to the platform.
-
-        Args:
-            title: The listing title
-            description: The listing description
-            price: The listing price
-            image_paths: List of absolute paths to images
-
-        Returns:
-            PostingResult with success status and optional external ID/URL
-        """
+        """Post a listing to the platform."""
         pass

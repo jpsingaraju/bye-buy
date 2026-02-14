@@ -58,6 +58,7 @@ class FacebookMarketplacePoster(PlatformPoster):
         price: float,
         image_paths: list[str],
         condition: str = "good",
+        location: str | None = None,
     ) -> PostingResult:
         """Post a listing to Facebook Marketplace."""
         client = None

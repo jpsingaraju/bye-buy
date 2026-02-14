@@ -38,6 +38,7 @@ class EbayPoster(PlatformPoster):
         price: float,
         image_paths: list[str],
         condition: str = "good",
+        location: str | None = None,
     ) -> PostingResult:
         client = None
         session_id = None

@@ -38,6 +38,7 @@ class CraigslistPoster(PlatformPoster):
         price: float,
         image_paths: list[str],
         condition: str = "good",
+        location: str | None = None,
     ) -> PostingResult:
         client = None
         session_id = None
@@ -118,6 +119,14 @@ class CraigslistPoster(PlatformPoster):
                         try:
                             zip_input = page.locator('input[name="postal"]')
                             await zip_input.fill(settings.craigslist_zip_code, timeout=3000)
+                        except (PlaywrightTimeout, Exception):
+                            pass
+
+                    # City / neighborhood (from listing location)
+                    if location:
+                        try:
+                            city_input = page.locator('input[name="city"]')
+                            await city_input.fill(location, timeout=3000)
                         except (PlaywrightTimeout, Exception):
                             pass
 
