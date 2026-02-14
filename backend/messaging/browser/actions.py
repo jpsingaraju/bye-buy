@@ -86,7 +86,7 @@ async def click_conversation(session, buyer_name: str) -> bool:
         return False
 
 
-async def send_message(session, message: str, buyer_name: str = "") -> bool:
+async def send_message(session, message: str) -> bool:
     """Type and send a message in the chat popup."""
     try:
         delay = random.uniform(1, 3)
@@ -94,10 +94,10 @@ async def send_message(session, message: str, buyer_name: str = "") -> bool:
         await asyncio.sleep(delay)
 
         # Step 1: Click the input field and type the message
-        popup_ref = f" in {buyer_name}'s chat popup" if buyer_name else " in the chat popup at the bottom right of the screen"
         await session.act(
             input=(
-                f"Click on the message input field{popup_ref} and type this message: {message}"
+                f"Click on the message input field in the chat popup at the "
+                f"bottom right of the screen and type this message: {message}"
             ),
         )
         await asyncio.sleep(1)

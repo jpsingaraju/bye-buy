@@ -79,17 +79,17 @@ async def extract_conversation_list(session) -> list[ConversationPreview]:
         return []
 
 
-async def extract_chat_messages(session, buyer_name: str = "") -> ConversationData:
+async def extract_chat_messages(session) -> ConversationData:
     """Extract messages from the open chat/conversation on screen."""
     try:
-        popup_ref = f" for '{buyer_name}'" if buyer_name else ""
         result = await session.extract(
             instruction=(
-                f"Extract all visible chat messages from the chat popup{popup_ref} "
-                f"at the bottom of the screen. For each message get: the "
-                f"sender's name, the message text content, and whether it was "
-                f"sent by the buyer (not by me/the seller). Also get the buyer's "
-                f"name and the listing title if visible."
+                "Extract all visible chat messages from the currently open "
+                "conversation on this page. This could be a chat popup, a chat "
+                "panel, or a full conversation view. For each message get: the "
+                "sender's name, the message text content, and whether it was "
+                "sent by the buyer (not by me/the seller). Also get the buyer's "
+                "name and the listing title if visible."
             ),
             schema={
                 "type": "object",

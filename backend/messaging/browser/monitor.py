@@ -119,7 +119,7 @@ class MessageMonitor:
             return
 
         # Extract messages from the chat popup
-        conv_data = await extract_chat_messages(browser_session, buyer_name)
+        conv_data = await extract_chat_messages(browser_session)
         logger.info(
             f"Chat popup for {buyer_name}: {len(conv_data.messages)} messages, "
             f"listing='{conv_data.listing_title}'"
@@ -186,7 +186,7 @@ class MessageMonitor:
                     "Hey, sorry but this item has already been sold! Thanks for "
                     "your interest though."
                 )
-                sent = await browser_send_message(browser_session, response_text, buyer_name)
+                sent = await browser_send_message(browser_session, response_text)
                 await ConversationService.add_message(
                     db,
                     conversation_id=conversation.id,
@@ -221,7 +221,7 @@ class MessageMonitor:
             )
 
             # Send AI response via chat popup
-            sent = await browser_send_message(browser_session, ai_result.message, buyer_name)
+            sent = await browser_send_message(browser_session, ai_result.message)
             logger.info(f"Message send {'succeeded' if sent else 'FAILED'} for {buyer_name}")
 
             # Save seller message
