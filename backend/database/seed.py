@@ -16,6 +16,16 @@ DEFAULT_LISTINGS = [
         "status": "active",
         "seller_notes": "Delivery only, no local pickup. Looking for cash or Venmo. Includes original box and charging cable.",
     },
+    {
+        "title": "Home Office Chair [PERFECT CONDITION]",
+        "description": "Home office chair in perfect condition. Ergonomic design, comfortable for long hours of work.",
+        "price": 30.0,
+        "min_price": 20.0,
+        "willing_to_negotiate": True,
+        "condition": "like_new",
+        "status": "active",
+        "seller_notes": "Delivery only, no local pickup.",
+    },
 ]
 
 

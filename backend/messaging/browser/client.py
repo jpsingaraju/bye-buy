@@ -60,3 +60,19 @@ async def close_session():
             _session = None
             _session_id = None
             _client = None
+
+
+async def reset_session():
+    """Reset the cached session (e.g. after a 410 timeout).
+    Clears the cached session so the next get_stagehand_session() creates a new one."""
+    global _client, _session, _session_id
+    logger.warning("Resetting stale Stagehand session")
+    # Try to close gracefully but don't worry if it fails (session is already dead)
+    if _session:
+        try:
+            await _session.end()
+        except Exception:
+            pass
+    _session = None
+    _session_id = None
+    _client = None
