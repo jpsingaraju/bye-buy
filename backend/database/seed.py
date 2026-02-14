@@ -14,7 +14,7 @@ DEFAULT_LISTINGS = [
         "willing_to_negotiate": True,
         "condition": "good",
         "status": "active",
-        "seller_notes": "Prefer local pickup. Looking for cash or Venmo. Includes original box and charging cable.",
+        "seller_notes": "Delivery only, no local pickup. Looking for cash or Venmo. Includes original box and charging cable.",
     },
 ]
 
