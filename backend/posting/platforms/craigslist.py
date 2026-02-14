@@ -99,53 +99,84 @@ class CraigslistPoster(PlatformPoster):
             except PlaywrightTimeout:
                 logger.info("No category selection step, continuing")
 
-            # --- Step 3: Fill listing form ---
-            try:
-                # Title
-                title_input = page.locator('input[name="PostingTitle"]')
-                await title_input.wait_for(timeout=8000)
-                await title_input.fill(title)
-
-                # Price
-                price_input = page.locator('input[name="price"]')
-                await price_input.fill(str(int(price)))
-
-                # Description
-                desc_input = page.locator('textarea[name="PostingBody"]')
-                await desc_input.fill(description)
-
-                # Condition
-                cond_value = CONDITION_MAP.get(condition, "good")
+            # --- Step 3: Fill listing form and submit ---
+            # Craigslist may show validation errors on first load; fill and retry up to 2 times.
+            for form_attempt in range(2):
                 try:
-                    cond_select = page.locator('select[name="condition"]')
-                    await cond_select.select_option(label=cond_value, timeout=3000)
-                    logger.info(f"Craigslist condition: {cond_value}")
-                except (PlaywrightTimeout, Exception):
-                    logger.info("No condition dropdown found")
+                    title_input = page.locator('input[name="PostingTitle"]')
+                    await title_input.wait_for(timeout=8000)
+                    await title_input.fill(title)
 
-                await page.wait_for_timeout(500)
-                logger.info("Craigslist form filled")
-            except PlaywrightTimeout:
-                return PostingResult(
-                    success=False,
-                    error_message=f"Craigslist form fields not found. Current URL: {page.url}",
-                )
+                    price_input = page.locator('input[name="price"]')
+                    await price_input.fill(str(int(price)))
 
-            # Click continue
-            continue_btn = page.locator('button:has-text("continue"), input[type="submit"]').first
-            await continue_btn.click(timeout=5000)
-            await page.wait_for_timeout(2000)
+                    desc_input = page.locator('textarea[name="PostingBody"]')
+                    await desc_input.fill(description)
+
+                    # ZIP code
+                    if settings.craigslist_zip_code:
+                        try:
+                            zip_input = page.locator('input[name="postal"]')
+                            await zip_input.fill(settings.craigslist_zip_code, timeout=3000)
+                        except (PlaywrightTimeout, Exception):
+                            pass
+
+                    # Email
+                    if settings.craigslist_email:
+                        try:
+                            email_input = page.locator('input[name="FromEMail"]')
+                            await email_input.fill(settings.craigslist_email, timeout=3000)
+                            try:
+                                confirm_email = page.locator('input[name="ConfirmEMail"]')
+                                await confirm_email.fill(settings.craigslist_email, timeout=2000)
+                            except (PlaywrightTimeout, Exception):
+                                pass
+                        except (PlaywrightTimeout, Exception):
+                            pass
+
+                    # Condition
+                    cond_value = CONDITION_MAP.get(condition, "good")
+                    try:
+                        cond_select = page.locator('select[name="condition"]')
+                        await cond_select.select_option(label=cond_value, timeout=3000)
+                    except (PlaywrightTimeout, Exception):
+                        pass
+
+                    await page.wait_for_timeout(500)
+                    logger.info(f"Form filled (attempt {form_attempt + 1})")
+                except PlaywrightTimeout:
+                    return PostingResult(
+                        success=False,
+                        error_message=f"Craigslist form fields not found. Current URL: {page.url}",
+                    )
+
+                # Click continue to submit
+                continue_btn = page.locator('button:has-text("continue"), input[type="submit"]').first
+                await continue_btn.click(timeout=5000)
+                await page.wait_for_timeout(3000)
+                logger.info(f"After form submit (attempt {form_attempt + 1}), URL: {page.url}")
+
+                # Check if we're still on the form with validation errors
+                page_html = await page.content()
+                page_text = await page.text_content("body") or ""
+                if 'name="PostingTitle"' in page_html and "Some required information" in page_text:
+                    logger.warning(f"Form validation failed (attempt {form_attempt + 1}), retrying...")
+                    continue
+                break
 
             # --- Step 4: Handle location/map page if shown ---
-            current_url = page.url
-            if "geoverify" in current_url or "map" in current_url:
+            for geo_attempt in range(3):
+                current_url = page.url
+                if "geoverify" not in current_url and "map" not in current_url:
+                    break
+                logger.info(f"On geoverify page (attempt {geo_attempt + 1})")
                 try:
                     continue_btn = page.locator('button:has-text("continue"), input[type="submit"]').first
                     await continue_btn.click(timeout=5000)
-                    await page.wait_for_timeout(2000)
-                    logger.info("Passed location page")
+                    await page.wait_for_timeout(3000)
+                    logger.info(f"After geoverify, URL: {page.url}")
                 except (PlaywrightTimeout, Exception):
-                    pass
+                    break
 
             # --- Step 5: Upload images ---
             if image_paths:
@@ -172,6 +203,15 @@ class CraigslistPoster(PlatformPoster):
                 except (PlaywrightTimeout, Exception):
                     pass
 
+            # Handle geoverify again in case it appears after images
+            if "geoverify" in page.url:
+                try:
+                    continue_btn = page.locator('button:has-text("continue"), input[type="submit"]').first
+                    await continue_btn.click(timeout=5000)
+                    await page.wait_for_timeout(3000)
+                except (PlaywrightTimeout, Exception):
+                    pass
+
             # --- Step 6: Review and publish ---
             try:
                 publish_btn = page.locator('button:has-text("publish"), input[value="publish"]').first
@@ -186,14 +226,21 @@ class CraigslistPoster(PlatformPoster):
             final_url = page.url
             page_text = await page.text_content("body") or ""
 
-            if "check your email" in page_text.lower() or "verify" in page_text.lower():
+            if "check your email" in page_text.lower() or "email verification" in page_text.lower():
                 return PostingResult(
                     success=True,
                     external_url=final_url,
                     error_message="Craigslist requires email verification. Check your email to complete the posting.",
                 )
 
-            success = "craigslist.org" in final_url and "post" not in final_url.split("/")[-1]
+            # Success if we're past the posting flow (not on form/geoverify/edit pages)
+            page_html = await page.content()
+            success = (
+                "craigslist.org" in final_url
+                and "geoverify" not in final_url
+                and "s=edit" not in final_url
+                and 'name="PostingTitle"' not in page_html
+            )
 
             await page.context.browser.close()
             pw = None

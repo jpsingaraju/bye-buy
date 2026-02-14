@@ -17,6 +17,7 @@ class Listing(Base):
     willing_to_negotiate: Mapped[bool] = mapped_column(Boolean, default=True)
     seller_notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     condition: Mapped[str] = mapped_column(String(20), default="good")
+    location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

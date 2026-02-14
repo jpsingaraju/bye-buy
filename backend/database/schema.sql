@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS listings (
     willing_to_negotiate BOOLEAN DEFAULT 1,
     seller_notes TEXT,
     condition TEXT NOT NULL DEFAULT 'good',
+    location TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

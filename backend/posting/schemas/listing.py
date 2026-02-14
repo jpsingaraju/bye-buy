@@ -11,6 +11,7 @@ class ListingCreate(BaseModel):
     willing_to_negotiate: bool = True
     seller_notes: Optional[str] = None
     condition: str = "good"
+    location: Optional[str] = None
 
 
 class ListingUpdate(BaseModel):
@@ -21,6 +22,7 @@ class ListingUpdate(BaseModel):
     willing_to_negotiate: Optional[bool] = None
     seller_notes: Optional[str] = None
     condition: Optional[str] = None
+    location: Optional[str] = None
     status: Optional[str] = None
 
 
@@ -44,6 +46,7 @@ class ListingResponse(BaseModel):
     willing_to_negotiate: bool = True
     seller_notes: Optional[str] = None
     condition: str = "good"
+    location: Optional[str] = None
     status: str = "active"
     created_at: datetime
     updated_at: datetime

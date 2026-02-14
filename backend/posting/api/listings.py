@@ -29,6 +29,7 @@ async def create_listing(
     willing_to_negotiate: bool = Form(True),
     seller_notes: Optional[str] = Form(None),
     condition: str = Form("good"),
+    location: Optional[str] = Form(None),
     images: list[UploadFile] = File(default=[]),
     session: AsyncSession = Depends(get_session),
 ):
@@ -41,6 +42,7 @@ async def create_listing(
         willing_to_negotiate=willing_to_negotiate,
         seller_notes=seller_notes,
         condition=condition,
+        location=location,
     )
     session.add(listing)
     await session.flush()

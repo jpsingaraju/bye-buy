@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(BACKEND_DIR / ".env"),
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     upload_dir: Path = Path(__file__).parent / "uploads"
@@ -18,6 +19,8 @@ class Settings(BaseSettings):
     model_api_key: str = ""
 
     craigslist_location: str = ""
+    craigslist_zip_code: str = ""
+    craigslist_email: str = ""
 
     worker_poll_interval: int = 5
     max_retries: int = 3
