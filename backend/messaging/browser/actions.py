@@ -44,7 +44,7 @@ async def click_conversation(session, buyer_name: str) -> bool:
 async def send_message(session, message: str) -> bool:
     """Type and send a message in the chat popup."""
     try:
-        delay = random.uniform(5, 15)
+        delay = random.uniform(1, 5)
         logger.info(f"Waiting {delay:.1f}s before typing (anti-detection)")
         await asyncio.sleep(delay)
 
