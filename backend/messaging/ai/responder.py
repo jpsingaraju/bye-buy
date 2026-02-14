@@ -24,6 +24,7 @@ async def generate_response(
     listing,
     messages: list,
     conversation_status: str = "active",
+    new_buyer_messages: list[str] | None = None,
 ) -> AIResponse | None:
     """Generate an AI response for a conversation.
 
@@ -31,13 +32,14 @@ async def generate_response(
         listing: The Listing model instance (or None if unmatched).
         messages: List of Message model instances (full conversation history).
         conversation_status: Current conversation status (e.g. "pending_address").
+        new_buyer_messages: New buyer messages not yet responded to.
 
     Returns:
         AIResponse with message text and deal status, or None on failure.
     """
     client = get_openai_client()
     system_prompt = build_system_prompt(listing, conversation_status)
-    chat_history = build_message_history(messages)
+    chat_history = build_message_history(messages, new_buyer_messages)
 
     try:
         response = await client.chat.completions.create(

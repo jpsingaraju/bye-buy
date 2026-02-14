@@ -102,15 +102,16 @@ class MessageMonitor:
         targets = conversations[: settings.max_conversations_per_cycle]
         logger.info(f"Checking {len(targets)} conversations")
 
+        handled_listings = set()  # Track listing titles we've handled this cycle
         for conv_preview in targets:
             try:
-                await self._handle_conversation(session, conv_preview)
+                await self._handle_conversation(session, conv_preview, handled_listings)
             except Exception as e:
                 error_msg = f"Error handling {conv_preview.buyer_name}: {e}"
                 logger.error(error_msg)
                 self.recent_errors.append(error_msg)
 
-    async def _handle_conversation(self, browser_session, conv_preview):
+    async def _handle_conversation(self, browser_session, conv_preview, handled_listings: set):
         """Handle a single conversation: click, extract from chat popup, diff, respond."""
         buyer_name = conv_preview.buyer_name
 
@@ -120,6 +121,17 @@ class MessageMonitor:
 
         # Extract messages from the chat popup
         conv_data = await extract_chat_messages(browser_session)
+
+        # Deduplicate: if we already handled this listing+messages combo this cycle,
+        # skip it (Stagehand sometimes hallucinates multiple conversation entries
+        # that all point to the same real chat)
+        dedup_key = conv_data.listing_title.lower().strip()
+        if dedup_key and dedup_key in handled_listings:
+            logger.info(f"Already handled '{conv_data.listing_title}' this cycle, skipping {buyer_name}")
+            await close_chat_popup(browser_session)
+            return
+        if dedup_key:
+            handled_listings.add(dedup_key)
         logger.info(
             f"Chat popup for {buyer_name}: {len(conv_data.messages)} messages, "
             f"listing='{conv_data.listing_title}'"
@@ -127,6 +139,12 @@ class MessageMonitor:
         for msg in conv_data.messages:
             logger.info(f"  {'BUYER' if msg.is_from_buyer else 'SELLER'}: {msg.content[:80]}")
         if not conv_data.messages:
+            await close_chat_popup(browser_session)
+            return
+
+        # Skip if the last message is from seller — we already responded, waiting for buyer
+        if not conv_data.messages[-1].is_from_buyer:
+            logger.info(f"Last message for {buyer_name} is from seller, skipping")
             await close_chat_popup(browser_session)
             return
 
@@ -200,14 +218,17 @@ class MessageMonitor:
                 await close_chat_popup(browser_session)
                 return
 
-            # Generate AI response
+            # Generate AI response — pass new messages separately so AI
+            # knows what to respond to vs what's already been handled
             all_messages = await ConversationService.get_messages(
                 db, conversation.id, limit=50
             )
+            new_contents = [m.content for m in new_buyer_messages]
             ai_result = await generate_response(
                 listing=listing,
                 messages=all_messages,
                 conversation_status=conversation.status,
+                new_buyer_messages=new_contents,
             )
 
             if not ai_result:

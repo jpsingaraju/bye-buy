@@ -3,6 +3,24 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+FB_UI_PATTERNS = [
+    "send a quick response",
+    "tap a response",
+    "quick reply",
+    "rate each other",
+    "beware of common scams",
+    "watch out for fake",
+    "message sent",
+    "you sent a quick reply",
+    "payment apps",
+    "report this conversation",
+]
+
+
+def _is_fb_ui_text(content: str) -> bool:
+    lower = content.lower().strip()
+    return any(p in lower for p in FB_UI_PATTERNS)
+
 
 @dataclass
 class ConversationPreview:
@@ -33,8 +51,10 @@ async def extract_conversation_list(session) -> list[ConversationPreview]:
     try:
         result = await session.extract(
             instruction=(
-                "Extract all visible conversations from the Facebook Marketplace "
-                "inbox. For each conversation, get: the buyer's name, "
+                "Extract ONLY the conversations that are literally visible on screen "
+                "in the Facebook Marketplace inbox list. Do NOT make up or fabricate "
+                "any names, titles, or text. If you cannot read a name clearly, skip "
+                "that conversation. For each conversation get: the buyer's name, "
                 "the listing/item title, and the message preview text."
             ),
             schema={
@@ -84,12 +104,16 @@ async def extract_chat_messages(session) -> ConversationData:
     try:
         result = await session.extract(
             instruction=(
-                "Extract all visible chat messages from the currently open "
-                "conversation on this page. This could be a chat popup, a chat "
-                "panel, or a full conversation view. For each message get: the "
-                "sender's name, the message text content, and whether it was "
-                "sent by the buyer (not by me/the seller). Also get the buyer's "
-                "name and the listing title if visible."
+                "Extract chat messages from the open conversation popup/panel. "
+                "ONLY extract actual messages that were sent by either the buyer "
+                "or the seller. IGNORE all Facebook UI elements including: quick "
+                "reply suggestion buttons, 'Send a quick response' prompts, "
+                "'Tap a response to send' text, scam warning banners, 'Rate each "
+                "other' prompts, 'Message sent' confirmations, and any other "
+                "Facebook interface text that is not an actual chat message. "
+                "For each real message get: the sender's name, the message text, "
+                "and whether it was sent by the buyer (not by me/the seller). "
+                "Also get the buyer's name and the listing title if visible."
             ),
             schema={
                 "type": "object",
@@ -124,6 +148,7 @@ async def extract_chat_messages(session) -> ConversationData:
                 is_from_buyer=m.get("is_from_buyer", True),
             )
             for m in data.get("messages", [])
+            if m.get("content") and not _is_fb_ui_text(m.get("content", ""))
         ]
 
         return ConversationData(
