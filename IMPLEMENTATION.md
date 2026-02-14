@@ -7,7 +7,7 @@ Multi-platform listing automation service that allows users to upload product li
 - **Frontend**: Next.js 16, React 19, Tailwind CSS, SWR, react-dropzone
 - **Backend**: Two FastAPI services (Python 3.13+), SQLAlchemy, aiosqlite
 - **Browser Automation**: Browserbase Stagehand (posting + message monitoring)
-- **AI**: OpenAI GPT (auto-responder)
+- **AI**: Google Gemini 2.0 Flash (free tier) for Stagehand automation
 - **Database**: SQLite (shared, WAL mode)
 - **Image Storage**: Local filesystem
 
@@ -72,6 +72,7 @@ Both services read from a single `.env` file at the backend root.
 - [x] `PlatformPoster` abstract base class
 - [x] `PlatformRegistry` for platform registration
 - [x] `FacebookMarketplacePoster` using Stagehand:
+  - **Google Gemini 2.0 Flash** model (free tier, no API costs)
   - Browserbase context support for persistent Facebook login cookies
   - CAPTCHA solving enabled
   - Login page detection
@@ -223,22 +224,49 @@ bye-buy/
 ### Backend `.env` file (`/backend/.env`)
 ```env
 # Browserbase (required for posting + messaging browser automation)
-BROWSERBASE_API_KEY=your-browserbase-api-key
-BROWSERBASE_PROJECT_ID=your-browserbase-project-id
-BROWSERBASE_CONTEXT_ID=               # Set via setup_facebook_login.py
+BROWSERBASE_API_KEY=bb_live_xxxxx     # Your Browserbase API key
+BROWSERBASE_PROJECT_ID=xxxxx          # Your Browserbase project ID
+BROWSERBASE_CONTEXT_ID=xxxxx          # Context ID with Facebook/Messenger logged in
 
-# AI keys
-MODEL_API_KEY=your-openai-api-key     # Used by Stagehand
-OPENAI_API_KEY=your-openai-api-key    # Used by messaging auto-responder
+# AI - Using Google Gemini (free tier)
+MODEL_API_KEY=AIzaSyxxxxx             # Google Gemini API key (get free at https://aistudio.google.com/apikey)
 ```
 
-### Facebook Login Setup
+### Current Configuration (Already Set Up)
+```env
+BROWSERBASE_API_KEY=bb_live_OFFYpd_PPSQrQhEIiJcaIKG3nWc
+BROWSERBASE_PROJECT_ID=56a3ccc3-7ae3-4352-bd69-7c38f09a19ea
+BROWSERBASE_CONTEXT_ID=3a23f18b-90a3-41d9-8172-cc90091e622b
+MODEL_API_KEY=AIzaSyD2-5g6TzJ2XqmRiAgloZ6yZMgKODlFiEg
+```
+
+### Facebook & Messenger Login Setup
+
+To create a new context with Facebook/Messenger authentication:
+
 ```bash
-cd backend
-# Set env vars first, then run:
-BROWSERBASE_API_KEY=... BROWSERBASE_PROJECT_ID=... uv run python setup_facebook_login.py
+# 1. Create a context
+curl -X POST https://api.browserbase.com/v1/contexts \
+  -H "X-BB-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"projectId": "YOUR_PROJECT_ID"}'
+
+# 2. Create a session with the context
+curl -X POST https://api.browserbase.com/v1/sessions \
+  -H "X-BB-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"projectId": "YOUR_PROJECT_ID", "browserSettings": {"context": {"id": "CONTEXT_ID", "persist": true}}}'
+
+# 3. Get the Live View URL
+curl -X GET "https://api.browserbase.com/v1/sessions/SESSION_ID/debug" \
+  -H "X-BB-API-Key: YOUR_API_KEY"
 ```
-This opens a Browserbase Live View where you log into Facebook. The script saves the context ID for persistent cookies.
+
+4. Open the `debuggerFullscreenUrl` in your browser
+5. Navigate to `facebook.com` and log in (check "Remember Me")
+6. Navigate to `messenger.com` to ensure Messenger is also authenticated
+7. Close the browser tab - cookies are saved to the context
+8. Add the context ID to your `.env` file
 
 ---
 
@@ -324,6 +352,24 @@ curl http://localhost:8001/stats
 1. **Image Upload to Facebook**: Uses Stagehand's `execute()` which may not handle file uploads. May need Browserbase's direct Playwright access for file inputs.
 2. **eBay/Craigslist**: Platform registry is ready but implementations not yet created.
 3. **Messaging frontend**: No UI for the messaging service yet (API-only).
+4. **Facebook Marketplace Verification**: Posting automation is implemented but may require additional testing to confirm listings appear correctly on Facebook.
+
+## AI Model Options
+
+Stagehand supports multiple AI providers. Currently using **Google Gemini** (free tier):
+
+| Provider | Model | Cost | Status |
+|----------|-------|------|--------|
+| **Google Gemini** | `google/gemini-2.0-flash` | Free | Currently active |
+| OpenAI | `gpt-4o` | Paid | Available (change in code) |
+| Anthropic | `anthropic/claude-3-5-sonnet` | Paid | Available |
+
+To switch models, update `facebook_marketplace.py`:
+```python
+session_params = {
+    "model_name": "google/gemini-2.0-flash",  # Change this
+}
+```
 
 ---
 
