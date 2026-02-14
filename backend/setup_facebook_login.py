@@ -11,14 +11,20 @@ Run this script, then:
 """
 
 import asyncio
+import os
+from pathlib import Path
+
 from browserbase import Browserbase
 
-# Your Browserbase credentials
-API_KEY = "bb_live_OFFYpd_PPSQrQhEIiJcaIKG3nWc"
-PROJECT_ID = "56a3ccc3-7ae3-4352-bd69-7c38f09a19ea"
+API_KEY = os.environ.get("BROWSERBASE_API_KEY", "")
+PROJECT_ID = os.environ.get("BROWSERBASE_PROJECT_ID", "")
 
 
 async def main():
+    if not API_KEY or not PROJECT_ID:
+        print("Error: Set BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID env vars.")
+        return
+
     # Initialize Browserbase client
     bb = Browserbase(api_key=API_KEY)
 
@@ -68,7 +74,7 @@ async def main():
     print(f"\n{'='*60}")
 
     # Also update the .env file automatically
-    env_path = "/Users/vikra/bye-buy/backend/posting/.env"
+    env_path = Path(__file__).parent / ".env"
     try:
         with open(env_path, "r") as f:
             content = f.read()

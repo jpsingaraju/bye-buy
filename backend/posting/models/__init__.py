@@ -1,4 +1,4 @@
-from .listing import Listing
+from database.models.listing import Listing
 from .image import ListingImage
 from .job import PostingJob, JobLog
 

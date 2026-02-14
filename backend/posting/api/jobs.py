@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from datetime import datetime
 
-from ..database.connection import get_session
+from database.connection import get_session
 from ..models import PostingJob, JobLog
 from ..schemas import PostingJobResponse, PostingJobWithLogsResponse, JobLogResponse
 from ..config import settings

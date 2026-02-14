@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from sqlalchemy import select
 
-from ..database.connection import async_session
+from database.connection import async_session
 from ..models import PostingJob
 from ..config import settings
 from .job_processor import process_job

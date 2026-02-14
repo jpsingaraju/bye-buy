@@ -7,12 +7,19 @@ class ListingCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: str = Field(..., min_length=1)
     price: float = Field(..., gt=0)
+    min_price: Optional[float] = Field(None, gt=0)
+    willing_to_negotiate: bool = True
+    seller_notes: Optional[str] = None
 
 
 class ListingUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, min_length=1)
     price: Optional[float] = Field(None, gt=0)
+    min_price: Optional[float] = Field(None, gt=0)
+    willing_to_negotiate: Optional[bool] = None
+    seller_notes: Optional[str] = None
+    status: Optional[str] = None
 
 
 class ListingImageResponse(BaseModel):
@@ -31,6 +38,10 @@ class ListingResponse(BaseModel):
     title: str
     description: str
     price: float
+    min_price: Optional[float] = None
+    willing_to_negotiate: bool = True
+    seller_notes: Optional[str] = None
+    status: str = "active"
     created_at: datetime
     updated_at: datetime
 

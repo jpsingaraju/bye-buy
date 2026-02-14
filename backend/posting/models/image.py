@@ -1,12 +1,8 @@
 from datetime import datetime
 from sqlalchemy import String, Integer, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from typing import TYPE_CHECKING
 
-from ..database.connection import Base
-
-if TYPE_CHECKING:
-    from .listing import Listing
+from database.connection import Base
 
 
 class ListingImage(Base):
@@ -19,4 +15,6 @@ class ListingImage(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    listing: Mapped["Listing"] = relationship("Listing", back_populates="images")
+    listing = relationship(
+        "Listing", backref="images", cascade="all"
+    )

@@ -1,12 +1,9 @@
 from datetime import datetime
 from sqlalchemy import String, Integer, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
-from ..database.connection import Base
-
-if TYPE_CHECKING:
-    from .listing import Listing
+from database.connection import Base
 
 
 class PostingJob(Base):
@@ -24,7 +21,7 @@ class PostingJob(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    listing: Mapped["Listing"] = relationship("Listing", back_populates="jobs")
+    listing = relationship("Listing", backref="jobs")
     logs: Mapped[list["JobLog"]] = relationship(
         "JobLog", back_populates="job", cascade="all, delete-orphan"
     )

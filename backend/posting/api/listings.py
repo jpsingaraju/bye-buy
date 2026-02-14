@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import Optional
 
-from ..database.connection import get_session
+from database.connection import get_session
 from ..models import Listing, ListingImage, PostingJob
 from ..schemas import (
     ListingCreate,
@@ -24,11 +24,21 @@ async def create_listing(
     title: str = Form(...),
     description: str = Form(...),
     price: float = Form(...),
+    min_price: Optional[float] = Form(None),
+    willing_to_negotiate: bool = Form(True),
+    seller_notes: Optional[str] = Form(None),
     images: list[UploadFile] = File(default=[]),
     session: AsyncSession = Depends(get_session),
 ):
     """Create a new listing with optional images."""
-    listing = Listing(title=title, description=description, price=price)
+    listing = Listing(
+        title=title,
+        description=description,
+        price=price,
+        min_price=min_price,
+        willing_to_negotiate=willing_to_negotiate,
+        seller_notes=seller_notes,
+    )
     session.add(listing)
     await session.flush()
 
@@ -74,6 +84,10 @@ async def update_listing(
     title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     price: Optional[float] = Form(None),
+    min_price: Optional[float] = Form(None),
+    willing_to_negotiate: Optional[bool] = Form(None),
+    seller_notes: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
     images: list[UploadFile] = File(default=[]),
     session: AsyncSession = Depends(get_session),
 ):
@@ -91,6 +105,14 @@ async def update_listing(
         listing.description = description
     if price is not None:
         listing.price = price
+    if min_price is not None:
+        listing.min_price = min_price
+    if willing_to_negotiate is not None:
+        listing.willing_to_negotiate = willing_to_negotiate
+    if seller_notes is not None:
+        listing.seller_notes = seller_notes
+    if status is not None:
+        listing.status = status
 
     # Add new images if provided
     if images:

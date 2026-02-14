@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .api.router import router
-from .database.connection import Base, engine
+from database.connection import Base, engine
 from .config import settings
 from .queue.worker import worker
 
