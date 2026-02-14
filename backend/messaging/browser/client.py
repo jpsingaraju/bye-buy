@@ -8,11 +8,12 @@ logger = logging.getLogger(__name__)
 
 _client: AsyncStagehand | None = None
 _session = None
+_session_id: str | None = None
 
 
 async def get_stagehand_session():
     """Get or create a Stagehand session via Browserbase."""
-    global _client, _session
+    global _client, _session, _session_id
 
     if _session is not None:
         return _session
@@ -40,13 +41,14 @@ async def get_stagehand_session():
         }
 
     _session = await _client.sessions.start(**session_params)
-    logger.info("Stagehand session started")
+    _session_id = _session.data.session_id if _session.data else None
+    logger.info(f"Stagehand session started (id={_session_id})")
     return _session
 
 
 async def close_session():
     """Close the current Stagehand session."""
-    global _client, _session
+    global _client, _session, _session_id
 
     if _session:
         try:
@@ -56,4 +58,5 @@ async def close_session():
             logger.error(f"Error closing session: {e}")
         finally:
             _session = None
+            _session_id = None
             _client = None

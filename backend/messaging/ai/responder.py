@@ -44,7 +44,7 @@ async def generate_response(
                 *chat_history,
             ],
             temperature=0.7,
-            max_tokens=256,
+            max_completion_tokens=256,
         )
 
         raw = response.choices[0].message.content.strip()

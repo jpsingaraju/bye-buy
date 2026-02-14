@@ -6,10 +6,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ConversationPreview:
-    """Preview of a conversation from the sidebar."""
+    """Preview of a conversation from the Marketplace inbox."""
     buyer_name: str
     listing_title: str = ""
-    is_unread: bool = False
     preview_text: str = ""
 
 
@@ -30,14 +29,13 @@ class ConversationData:
 
 
 async def extract_conversation_list(session) -> list[ConversationPreview]:
-    """Extract the list of conversations from the Messenger sidebar."""
+    """Extract the list of conversations from the Facebook Marketplace inbox."""
     try:
         result = await session.extract(
             instruction=(
-                "Extract the list of conversations visible in the Messenger "
-                "Marketplace sidebar. For each conversation, get: the buyer's name, "
-                "the listing title (item name), whether it has an unread indicator "
-                "(bold text, blue dot, or notification badge), and the preview text."
+                "Extract all visible conversations from the Facebook Marketplace "
+                "inbox. For each conversation, get: the buyer's name, "
+                "the listing/item title, and the message preview text."
             ),
             schema={
                 "type": "object",
@@ -49,7 +47,6 @@ async def extract_conversation_list(session) -> list[ConversationPreview]:
                             "properties": {
                                 "buyer_name": {"type": "string"},
                                 "listing_title": {"type": "string"},
-                                "is_unread": {"type": "boolean"},
                                 "preview_text": {"type": "string"},
                             },
                         },
@@ -59,33 +56,40 @@ async def extract_conversation_list(session) -> list[ConversationPreview]:
         )
 
         data = result.data if hasattr(result, "data") else result
+        # Unwrap Data object: data.result contains the actual dict
+        if hasattr(data, "result"):
+            data = data.result
+        logger.info(f"Raw extract result: {data}")
         conversations_raw = (
             data.get("conversations", []) if isinstance(data, dict) else []
         )
 
-        return [
+        convos = [
             ConversationPreview(
                 buyer_name=c.get("buyer_name", "Unknown"),
                 listing_title=c.get("listing_title", ""),
-                is_unread=c.get("is_unread", False),
                 preview_text=c.get("preview_text", ""),
             )
             for c in conversations_raw
         ]
+        logger.info(f"Extracted {len(convos)} conversations")
+        return convos
     except Exception as e:
         logger.error(f"Failed to extract conversation list: {e}")
         return []
 
 
-async def extract_conversation_messages(session) -> ConversationData:
-    """Extract all messages from the currently open conversation."""
+async def extract_chat_messages(session) -> ConversationData:
+    """Extract messages from the open chat/conversation on screen."""
     try:
         result = await session.extract(
             instruction=(
-                "Extract all messages from this Messenger conversation. "
-                "For each message, get: the sender's name, the message content, "
-                "and whether it was sent by the buyer (not by me/the seller). "
-                "Also extract the listing title from the conversation header."
+                "Extract all visible chat messages from the currently open "
+                "conversation on this page. This could be a chat popup, a chat "
+                "panel, or a full conversation view. For each message get: the "
+                "sender's name, the message text content, and whether it was "
+                "sent by the buyer (not by me/the seller). Also get the buyer's "
+                "name and the listing title if visible."
             ),
             schema={
                 "type": "object",
@@ -108,6 +112,8 @@ async def extract_conversation_messages(session) -> ConversationData:
         )
 
         data = result.data if hasattr(result, "data") else result
+        if hasattr(data, "result"):
+            data = data.result
         if not isinstance(data, dict):
             return ConversationData(buyer_name="Unknown", listing_title="")
 
@@ -126,5 +132,5 @@ async def extract_conversation_messages(session) -> ConversationData:
             messages=messages,
         )
     except Exception as e:
-        logger.error(f"Failed to extract messages: {e}")
+        logger.error(f"Failed to extract chat messages: {e}")
         return ConversationData(buyer_name="Unknown", listing_title="")

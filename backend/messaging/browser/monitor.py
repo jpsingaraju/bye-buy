@@ -11,12 +11,12 @@ from ..services.conversation_service import ConversationService
 from ..services.matching_service import MatchingService
 from ..config import settings
 from .client import get_stagehand_session, close_session
-from .extractor import extract_conversation_list, extract_conversation_messages
+from .extractor import extract_conversation_list, extract_chat_messages
 from .actions import (
     navigate_to_marketplace,
     click_conversation,
     send_message as browser_send_message,
-    go_back_to_conversation_list,
+    close_chat_popup,
 )
 from ..ai.responder import generate_response
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class MessageMonitor:
-    """Main polling loop for monitoring Messenger conversations."""
+    """Main polling loop for monitoring Marketplace conversations."""
 
     def __init__(self):
         self.running = False
@@ -87,27 +87,20 @@ class MessageMonitor:
         """Single poll cycle: check conversations and respond."""
         session = await get_stagehand_session()
 
-        # Navigate to marketplace
+        # Navigate to marketplace inbox
         if not await navigate_to_marketplace(session):
             return
 
         # Extract conversation list
         conversations = await extract_conversation_list(session)
         if not conversations:
+            logger.info("No conversations found")
             return
 
-        # Determine which conversations to check (hybrid detection)
-        is_full_sweep = (self.cycle_count % settings.full_sweep_interval == 0)
-        if is_full_sweep:
-            targets = conversations
-            logger.info(f"Full sweep: checking all {len(targets)} conversations")
-        else:
-            targets = [c for c in conversations if c.is_unread]
-            if not targets:
-                return
-
-        # Limit conversations per cycle
-        targets = targets[: settings.max_conversations_per_cycle]
+        # Check all conversations (can't detect unread on FB inbox)
+        # Limit per cycle to avoid burning too many API calls
+        targets = conversations[: settings.max_conversations_per_cycle]
+        logger.info(f"Checking {len(targets)} conversations")
 
         for conv_preview in targets:
             try:
@@ -117,21 +110,24 @@ class MessageMonitor:
                 logger.error(error_msg)
                 self.recent_errors.append(error_msg)
 
-        # Go back to list view after processing
-        await go_back_to_conversation_list(session)
-
     async def _handle_conversation(self, browser_session, conv_preview):
-        """Handle a single conversation: extract, diff, respond, save."""
+        """Handle a single conversation: click, extract from chat popup, diff, respond."""
         buyer_name = conv_preview.buyer_name
 
-        # Click into conversation
+        # Click conversation to open chat popup
         if not await click_conversation(browser_session, buyer_name):
             return
 
-        # Extract messages
-        conv_data = await extract_conversation_messages(browser_session)
+        # Extract messages from the chat popup
+        conv_data = await extract_chat_messages(browser_session)
+        logger.info(
+            f"Chat popup for {buyer_name}: {len(conv_data.messages)} messages, "
+            f"listing='{conv_data.listing_title}'"
+        )
+        for msg in conv_data.messages:
+            logger.info(f"  {'BUYER' if msg.is_from_buyer else 'SELLER'}: {msg.content[:80]}")
         if not conv_data.messages:
-            await go_back_to_conversation_list(browser_session)
+            await close_chat_popup(browser_session)
             return
 
         async with async_session() as db:
@@ -151,7 +147,7 @@ class MessageMonitor:
 
             # Skip if conversation is closed/sold
             if conversation.status in ("closed", "sold"):
-                await go_back_to_conversation_list(browser_session)
+                await close_chat_popup(browser_session)
                 return
 
             # DB diff: find truly new messages
@@ -166,8 +162,13 @@ class MessageMonitor:
                     new_buyer_messages.append(msg)
 
             if not new_buyer_messages:
-                await go_back_to_conversation_list(browser_session)
+                await close_chat_popup(browser_session)
                 return
+
+            logger.info(
+                f"New messages from {buyer_name}: "
+                f"{[m.content[:50] for m in new_buyer_messages]}"
+            )
 
             # Save new buyer messages to DB
             for msg in new_buyer_messages:
@@ -196,7 +197,7 @@ class MessageMonitor:
                 await ConversationService.update_status(
                     db, conversation.id, "closed"
                 )
-                await go_back_to_conversation_list(browser_session)
+                await close_chat_popup(browser_session)
                 return
 
             # Generate AI response
@@ -209,11 +210,18 @@ class MessageMonitor:
             )
 
             if not ai_result:
-                await go_back_to_conversation_list(browser_session)
+                logger.warning(f"No AI response generated for {buyer_name}")
+                await close_chat_popup(browser_session)
                 return
 
-            # Send AI response
+            logger.info(
+                f"AI response for {buyer_name}: {ai_result.message[:100]} "
+                f"(deal_status={ai_result.deal_status})"
+            )
+
+            # Send AI response via chat popup
             sent = await browser_send_message(browser_session, ai_result.message)
+            logger.info(f"Message send {'succeeded' if sent else 'FAILED'} for {buyer_name}")
 
             # Save seller message
             await ConversationService.add_message(
@@ -229,20 +237,19 @@ class MessageMonitor:
                 agreed_price = ai_result.agreed_price or (
                     listing.price if listing else 0
                 )
-                print(
+                logger.info(
                     f"DEAL REACHED: {listing.title if listing else 'Unknown'} - "
                     f"Buyer: {buyer_name} - ${agreed_price}"
                 )
                 await ConversationService.update_status(
                     db, conversation.id, "sold"
                 )
-                # Update listing status
                 if listing:
                     listing.status = "sold"
                     await db.commit()
 
             elif ai_result.deal_status == "needs_review":
-                print(
+                logger.info(
                     f"NEEDS REVIEW: {listing.title if listing else 'Unknown'} - "
                     f"Buyer: {buyer_name}"
                 )
@@ -250,7 +257,7 @@ class MessageMonitor:
                     db, conversation.id, "needs_review"
                 )
 
-        await go_back_to_conversation_list(browser_session)
+        await close_chat_popup(browser_session)
 
 
 # Global monitor instance
