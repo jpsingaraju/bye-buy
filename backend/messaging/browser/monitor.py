@@ -17,7 +17,6 @@ from .actions import (
     click_conversation,
     send_message as browser_send_message,
     close_chat_popup,
-    close_all_chat_popups,
 )
 from ..ai.responder import generate_response
 
@@ -33,7 +32,6 @@ class MessageMonitor:
         self.last_poll_at: datetime | None = None
         self.recent_errors: deque[str] = deque(maxlen=20)
         self._task: asyncio.Task | None = None
-        self._navigated = False
 
     async def start(self):
         """Start the monitoring loop."""
@@ -65,7 +63,6 @@ class MessageMonitor:
 
                 # Session break every N cycles
                 if self.cycle_count % settings.session_break_cycles == 0:
-                    self._navigated = False
                     break_time = random.uniform(
                         settings.session_break_min, settings.session_break_max
                     )
@@ -84,21 +81,15 @@ class MessageMonitor:
                 error_msg = f"Poll cycle error: {e}"
                 logger.error(error_msg)
                 self.recent_errors.append(error_msg)
-                self._navigated = False
                 await asyncio.sleep(settings.poll_interval_max)
 
     async def _poll_cycle(self):
         """Single poll cycle: check conversations and respond."""
         session = await get_stagehand_session()
 
-        # Navigate to marketplace inbox (only on first cycle or after reset)
-        if not self._navigated:
-            if not await navigate_to_marketplace(session):
-                return
-            self._navigated = True
-
-        # Close any stray chat popups before extracting
-        await close_all_chat_popups(session)
+        # Navigate to marketplace inbox
+        if not await navigate_to_marketplace(session):
+            return
 
         # Extract conversation list
         conversations = await extract_conversation_list(session)

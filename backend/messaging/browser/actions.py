@@ -113,19 +113,6 @@ async def send_message(session, message: str, buyer_name: str = "") -> bool:
         return False
 
 
-async def close_all_chat_popups(session) -> bool:
-    """Close all open chat popups at the bottom of the screen."""
-    try:
-        await session.act(
-            input="Close ALL open chat popups at the bottom of the screen by clicking their X/close buttons. If there are no open chat popups, do nothing.",
-        )
-        await asyncio.sleep(1)
-        return True
-    except Exception as e:
-        logger.warning(f"Failed to close all chat popups: {e}")
-        return False
-
-
 async def close_chat_popup(session) -> bool:
     """Close the chat popup."""
     try:

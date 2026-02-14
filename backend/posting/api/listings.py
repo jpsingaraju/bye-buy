@@ -93,6 +93,7 @@ async def update_listing(
     willing_to_negotiate: Optional[bool] = Form(None),
     seller_notes: Optional[str] = Form(None),
     condition: Optional[str] = Form(None),
+    location: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
     images: list[UploadFile] = File(default=[]),
     session: AsyncSession = Depends(get_session),
@@ -119,6 +120,8 @@ async def update_listing(
         listing.seller_notes = seller_notes
     if condition is not None:
         listing.condition = condition
+    if location is not None:
+        listing.location = location
     if status is not None:
         listing.status = status
 
