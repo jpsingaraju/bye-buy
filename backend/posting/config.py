@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     browserbase_context_id: str = ""
     model_api_key: str = ""
 
+    craigslist_location: str = ""
+
     worker_poll_interval: int = 5
     max_retries: int = 3
 

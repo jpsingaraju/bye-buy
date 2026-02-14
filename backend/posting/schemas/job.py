@@ -1,10 +1,25 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+
+
+VALID_PLATFORMS = {"facebook_marketplace", "ebay", "craigslist"}
 
 
 class PostingJobCreate(BaseModel):
     platform: str = Field(..., pattern="^(facebook_marketplace|ebay|craigslist)$")
+
+
+class BatchPostingJobCreate(BaseModel):
+    platforms: list[str] = Field(..., min_length=1)
+
+    @field_validator("platforms")
+    @classmethod
+    def validate_platforms(cls, v: list[str]) -> list[str]:
+        invalid = set(v) - VALID_PLATFORMS
+        if invalid:
+            raise ValueError(f"Invalid platform(s): {', '.join(invalid)}")
+        return v
 
 
 class JobLogResponse(BaseModel):

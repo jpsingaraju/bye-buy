@@ -12,6 +12,7 @@ from ..schemas import (
     ListingResponse,
     ListingWithImagesResponse,
     PostingJobCreate,
+    BatchPostingJobCreate,
     PostingJobResponse,
 )
 from ..storage.images import image_storage
@@ -27,6 +28,7 @@ async def create_listing(
     min_price: Optional[float] = Form(None),
     willing_to_negotiate: bool = Form(True),
     seller_notes: Optional[str] = Form(None),
+    condition: str = Form("good"),
     images: list[UploadFile] = File(default=[]),
     session: AsyncSession = Depends(get_session),
 ):
@@ -38,6 +40,7 @@ async def create_listing(
         min_price=min_price,
         willing_to_negotiate=willing_to_negotiate,
         seller_notes=seller_notes,
+        condition=condition,
     )
     session.add(listing)
     await session.flush()
@@ -87,6 +90,7 @@ async def update_listing(
     min_price: Optional[float] = Form(None),
     willing_to_negotiate: Optional[bool] = Form(None),
     seller_notes: Optional[str] = Form(None),
+    condition: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
     images: list[UploadFile] = File(default=[]),
     session: AsyncSession = Depends(get_session),
@@ -111,6 +115,8 @@ async def update_listing(
         listing.willing_to_negotiate = willing_to_negotiate
     if seller_notes is not None:
         listing.seller_notes = seller_notes
+    if condition is not None:
+        listing.condition = condition
     if status is not None:
         listing.status = status
 
@@ -168,3 +174,27 @@ async def post_listing(
     await session.commit()
     await session.refresh(job)
     return job
+
+
+@router.post("/{listing_id}/post-batch", response_model=list[PostingJobResponse])
+async def post_listing_batch(
+    listing_id: int,
+    job_data: BatchPostingJobCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Create posting jobs for a listing across multiple platforms."""
+    result = await session.execute(select(Listing).where(Listing.id == listing_id))
+    listing = result.scalar_one_or_none()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+
+    jobs = []
+    for platform in job_data.platforms:
+        job = PostingJob(listing_id=listing_id, platform=platform)
+        session.add(job)
+        jobs.append(job)
+
+    await session.commit()
+    for job in jobs:
+        await session.refresh(job)
+    return jobs

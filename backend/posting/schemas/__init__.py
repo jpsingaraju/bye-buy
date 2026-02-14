@@ -7,6 +7,7 @@ from .listing import (
 )
 from .job import (
     PostingJobCreate,
+    BatchPostingJobCreate,
     PostingJobResponse,
     JobLogResponse,
     PostingJobWithLogsResponse,
@@ -19,6 +20,7 @@ __all__ = [
     "ListingImageResponse",
     "ListingWithImagesResponse",
     "PostingJobCreate",
+    "BatchPostingJobCreate",
     "PostingJobResponse",
     "JobLogResponse",
     "PostingJobWithLogsResponse",

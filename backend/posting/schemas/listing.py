@@ -10,6 +10,7 @@ class ListingCreate(BaseModel):
     min_price: Optional[float] = Field(None, gt=0)
     willing_to_negotiate: bool = True
     seller_notes: Optional[str] = None
+    condition: str = "good"
 
 
 class ListingUpdate(BaseModel):
@@ -19,6 +20,7 @@ class ListingUpdate(BaseModel):
     min_price: Optional[float] = Field(None, gt=0)
     willing_to_negotiate: Optional[bool] = None
     seller_notes: Optional[str] = None
+    condition: Optional[str] = None
     status: Optional[str] = None
 
 
@@ -41,6 +43,7 @@ class ListingResponse(BaseModel):
     min_price: Optional[float] = None
     willing_to_negotiate: bool = True
     seller_notes: Optional[str] = None
+    condition: str = "good"
     status: str = "active"
     created_at: datetime
     updated_at: datetime

@@ -10,7 +10,7 @@ from .config import settings
 from .queue.worker import worker
 
 # Import platform posters to register them
-from .platforms import facebook_marketplace  # noqa: F401
+from . import platforms  # noqa: F401
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

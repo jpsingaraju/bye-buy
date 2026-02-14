@@ -80,6 +80,7 @@ async def process_job(session: AsyncSession, job: PostingJob) -> bool:
             description=listing.description,
             price=listing.price,
             image_paths=image_paths,
+            condition=listing.condition,
         )
 
         if result.success:
