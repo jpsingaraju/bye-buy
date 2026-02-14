@@ -32,8 +32,25 @@ class FacebookMarketplacePoster(PlatformPoster):
                 model_api_key=settings.model_api_key,
             )
 
+            # Build session params with context if available
+            session_params = {
+                "model_name": "gpt-4o",
+            }
+
+            # Add context for persistent Facebook login
+            if settings.browserbase_context_id:
+                session_params["browserbase_session_create_params"] = {
+                    "browser_settings": {
+                        "context": {
+                            "id": settings.browserbase_context_id,
+                            "persist": True,  # Save any new cookies
+                        },
+                        "solve_captchas": True,
+                    }
+                }
+
             # Start a browser session
-            session = await client.sessions.start(model_name="gpt-4o")
+            session = await client.sessions.start(**session_params)
 
             # Navigate to Marketplace create item page
             await session.navigate(url="https://www.facebook.com/marketplace/create/item")
@@ -49,11 +66,11 @@ class FacebookMarketplacePoster(PlatformPoster):
 
                     Steps:
                     1. Wait for the page to fully load
-                    2. If there are photo/image upload buttons, note that images will be uploaded separately
+                    2. If you see a login page, the session is not authenticated - report this as an error
                     3. Find and fill in the title field with: {title}
                     4. Find and fill in the price field with: {int(price)}
                     5. Find and fill in the description field with: {description}
-                    6. Select an appropriate category for this item (e.g., Electronics, Home & Garden, etc.)
+                    6. Select an appropriate category for this item
                     7. Click the Next or Publish button to proceed
                     8. If there are additional confirmation steps, complete them
                     9. Wait for the listing to be created
@@ -67,7 +84,7 @@ class FacebookMarketplacePoster(PlatformPoster):
             # Try to extract the listing URL or confirmation
             try:
                 extract_result = await session.extract(
-                    instruction="Extract the URL of the newly created listing or any confirmation message that the listing was posted successfully",
+                    instruction="Extract the URL of the newly created listing or any confirmation message that the listing was posted successfully. If you see a login page, return success: false.",
                     schema={
                         "type": "object",
                         "properties": {
