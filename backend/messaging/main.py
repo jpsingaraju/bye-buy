@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database.connection import Base, engine
+from database.seed import seed_default_listings
 from .api.router import router
 from .browser.monitor import monitor
 
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    await seed_default_listings()
     logger.info("Messaging service started")
     yield
 
