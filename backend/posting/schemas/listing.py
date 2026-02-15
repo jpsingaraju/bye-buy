@@ -8,7 +8,7 @@ class ListingCreate(BaseModel):
     description: str = Field(..., min_length=1)
     price: float = Field(..., gt=0)
     min_price: Optional[float] = Field(None, gt=0)
-    willing_to_negotiate: bool = True
+    willing_to_negotiate: float = Field(0.5, ge=0, le=1)
     seller_notes: Optional[str] = None
     condition: str = "good"
     location: Optional[str] = None
@@ -19,7 +19,7 @@ class ListingUpdate(BaseModel):
     description: Optional[str] = Field(None, min_length=1)
     price: Optional[float] = Field(None, gt=0)
     min_price: Optional[float] = Field(None, gt=0)
-    willing_to_negotiate: Optional[bool] = None
+    willing_to_negotiate: Optional[float] = Field(None, ge=0, le=1)
     seller_notes: Optional[str] = None
     condition: Optional[str] = None
     location: Optional[str] = None
@@ -43,7 +43,7 @@ class ListingResponse(BaseModel):
     description: str
     price: float
     min_price: Optional[float] = None
-    willing_to_negotiate: bool = True
+    willing_to_negotiate: float = 0.5
     seller_notes: Optional[str] = None
     condition: str = "good"
     location: Optional[str] = None

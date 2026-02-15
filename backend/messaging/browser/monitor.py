@@ -1,14 +1,12 @@
 import asyncio
 import logging
 import random
-import time
 from collections import deque
 from datetime import datetime
 
 from sqlalchemy import select
 
 from database.connection import async_session
-from database.models.listing import Listing
 from ..models.transaction import Transaction
 from ..services.buyer_service import BuyerService
 from ..services.conversation_service import ConversationService
@@ -18,29 +16,22 @@ from .client import get_stagehand_session, close_session, reset_session
 from .extractor import extract_conversation_list, extract_chat_messages
 from .actions import (
     navigate_to_marketplace,
+    refresh_inbox,
     click_conversation,
+    close_all_popups,
     send_message as browser_send_message,
-    close_chat_popup,
-    close_all_chat_popups,
 )
 from ..ai.responder import generate_response
 
 logger = logging.getLogger(__name__)
 
-# 2 minutes of no new buyer messages before closing popup
-INACTIVITY_TIMEOUT = 120
+# Refresh interval when idle (no unread messages)
+IDLE_REFRESH_MIN = 9
+IDLE_REFRESH_MAX = 11
 
-# How often to re-extract the popup while watching (seconds)
-WATCH_INTERVAL_MIN = 5
-WATCH_INTERVAL_MAX = 10
-
-# How often to re-check inbox when no conversations (seconds)
-EMPTY_POLL_MIN = 5
-EMPTY_POLL_MAX = 10
-
-# How often to re-check inbox after handling conversations (seconds)
-ACTIVE_POLL_MIN = 30
-ACTIVE_POLL_MAX = 60
+# Refresh interval when active (just responded)
+ACTIVE_REFRESH_MIN = 3
+ACTIVE_REFRESH_MAX = 5
 
 
 class MessageMonitor:
@@ -53,6 +44,12 @@ class MessageMonitor:
         self.recent_errors: deque[str] = deque(maxlen=20)
         self._task: asyncio.Task | None = None
         self._on_inbox = False
+        self._consecutive_idle = 0  # refresh page after 3 idle cycles
+        # Track last seen inbox preview per buyer to detect new activity
+        # Compare current preview to stored: same → skip, different → open & check
+        self._last_seen_preview: dict[str, str] = {}
+        # Buyers with confirmed deals awaiting payment — always re-check these
+        self._awaiting_payment: set[str] = set()
 
     async def start(self):
         """Start the monitoring loop."""
@@ -75,14 +72,13 @@ class MessageMonitor:
         logger.info("Message monitor stopped")
 
     async def _run(self):
-        """Main loop: navigate to inbox, handle conversations, idle poll.
+        """Main loop: single-pass per conversation, fast refresh on activity.
 
         - Navigate to inbox, extract conversations
-        - For each conversation: close stray popups, open chat popup,
-          keep it open and re-extract every 5-10s, respond to new messages
-        - Close popup after 2 min inactivity (no new buyer messages)
-        - After handling all conversations: wait 30-60s, refresh inbox
-        - If item sells: send thank-you, close session, shut down
+        - For each conversation: open popup, check once, respond if needed, close
+        - If any response sent: force refresh inbox, wait 2-5s
+        - If idle (no new messages): wait 5-10s
+        - If empty (no conversations): wait 5-10s
         """
         while self.running:
             try:
@@ -107,17 +103,12 @@ class MessageMonitor:
                     )
                     logger.info(f"Session break: sleeping {break_time:.0f}s")
                     await asyncio.sleep(break_time)
-                elif result == "empty":
-                    # No conversations, check again quickly
-                    interval = random.uniform(EMPTY_POLL_MIN, EMPTY_POLL_MAX)
-                    logger.info(f"No convos, next inbox refresh in {interval:.0f}s")
-                    self._on_inbox = False
+                elif result == "responded":
+                    interval = random.uniform(ACTIVE_REFRESH_MIN, ACTIVE_REFRESH_MAX)
                     await asyncio.sleep(interval)
                 else:
-                    # Had conversations, wait longer before next check
-                    interval = random.uniform(ACTIVE_POLL_MIN, ACTIVE_POLL_MAX)
-                    logger.info(f"Next inbox refresh in {interval:.0f}s")
-                    self._on_inbox = False
+                    # Idle — wait longer before refreshing
+                    interval = random.uniform(IDLE_REFRESH_MIN, IDLE_REFRESH_MAX)
                     await asyncio.sleep(interval)
 
             except asyncio.CancelledError:
@@ -135,12 +126,17 @@ class MessageMonitor:
                 await asyncio.sleep(10)
 
     async def _poll_cycle(self) -> str:
-        """Single poll cycle.
+        """Single poll cycle: extract inbox, process unread conversations bottom-to-top.
+
+        Only opens conversations marked as unread (new buyer activity).
+        Processes bottom-to-top so the most neglected conversations get attention first.
+        If nothing is unread, returns "idle" and the caller sleeps before re-extracting.
 
         Returns:
             "deal_completed" - item sold, session closed
             "empty" - no conversations found
-            "handled" - conversations were handled
+            "responded" - at least one conversation got a response
+            "idle" - conversations exist but none are unread
         """
         session = await get_stagehand_session()
 
@@ -157,133 +153,159 @@ class MessageMonitor:
             self._on_inbox = False
             return "empty"
 
-        targets = conversations[: settings.max_conversations_per_cycle]
-        logger.info(f"Checking {len(targets)} conversations")
+        # Filter using preview comparison: if preview hasn't changed since
+        # last time we processed this buyer, skip without opening
+        # Exception: always re-check buyers awaiting payment
+        unread = []
+        for c in conversations:
+            if c.buyer_name in self._awaiting_payment:
+                unread.append(c)
+                continue
+            last_preview = self._last_seen_preview.get(c.buyer_name)
+            if last_preview and c.preview_text == last_preview:
+                logger.info(f"Skipping {c.buyer_name} (preview unchanged)")
+                continue
+            if c.is_unread:
+                unread.append(c)
 
-        handled_listings = set()
+        # Process bottom-to-top (most neglected first)
+        unread.reverse()
 
-        for conv_preview in targets:
+        logger.info(
+            f"Inbox: {len(conversations)} total, {len(unread)} unread "
+            f"(processing bottom-to-top)"
+        )
+
+        if not unread:
+            self._consecutive_idle += 1
+            if self._consecutive_idle >= 3:
+                logger.info("3 idle cycles, refreshing page")
+                self._consecutive_idle = 0
+                self._on_inbox = False
+            return "idle"
+
+        self._consecutive_idle = 0
+        any_responded = False
+
+        # Collect all buyer names so we can filter cross-talk from sidebar
+        all_buyer_names = {c.buyer_name for c in conversations}
+
+        for conv_preview in unread:
             try:
                 result = await self._handle_conversation(
-                    session, conv_preview, handled_listings
+                    session, conv_preview, all_buyer_names
                 )
+                # Always store current preview after handling, whether we
+                # responded or not — prevents re-opening loops
+                self._last_seen_preview[conv_preview.buyer_name] = conv_preview.preview_text
                 if result == "sold":
+                    self._awaiting_payment.discard(conv_preview.buyer_name)
                     logger.info("Item sold, closing Browserbase session")
                     await close_session()
                     self._on_inbox = False
                     return "deal_completed"
+                elif result == "responded":
+                    any_responded = True
             except Exception as e:
                 error_msg = f"Error handling {conv_preview.buyer_name}: {e}"
                 logger.error(error_msg)
                 self.recent_errors.append(error_msg)
 
-        return "handled"
+        return "responded" if any_responded else "idle"
 
     async def _handle_conversation(
-        self, browser_session, conv_preview, handled_listings: set
+        self, browser_session, conv_preview, all_buyer_names: set[str] | None = None
     ) -> str | None:
-        """Handle a single conversation. Keep popup open, watch for messages.
+        """Handle a single conversation.
 
-        Re-extracts every 5-10s. Closes popup after 2 min of no new buyer
-        messages, or when deal completes/fails.
+        Clicks the conversation row in the inbox list to show messages
+        in the conversation panel, extracts messages, and responds if needed.
 
-        Returns "sold" if payment confirmed, None otherwise.
+        Returns: "sold", "responded", or None
         """
-        buyer_name = conv_preview.buyer_name
+        display_name = conv_preview.display_name or conv_preview.buyer_name
+        buyer_name = conv_preview.buyer_name  # normalized for DB
 
-        # Close any stray popups first
-        await close_all_chat_popups(browser_session)
+        logger.info(
+            f"[handle_conversation] START: preview_buyer='{buyer_name}', "
+            f"display_name='{display_name}', preview_listing='{conv_preview.listing_title}', "
+            f"preview_text='{conv_preview.preview_text[:60]}', unread={conv_preview.is_unread}"
+        )
 
-        # Click conversation to open chat popup
-        if not await click_conversation(browser_session, buyer_name):
+        # Close any auto-opened chat popups before clicking so we don't
+        # accidentally extract/send in the wrong panel
+        await close_all_popups(browser_session)
+
+        # Click conversation row to show messages in panel
+        if not await click_conversation(browser_session, display_name):
+            logger.warning(f"[handle_conversation] Failed to click conversation for '{display_name}'")
             return None
 
-        result = None
-        last_activity = time.time()
-        listing_key_set = False
-
         try:
-            while True:
-                # Check inactivity timeout
-                idle_time = time.time() - last_activity
-                if idle_time >= INACTIVITY_TIMEOUT:
-                    logger.info(
-                        f"No new messages from {buyer_name} for {idle_time:.0f}s, "
-                        f"closing popup"
-                    )
-                    break
+            # Pass other buyer names so extractor can filter sidebar cross-talk
+            other_buyers = list(all_buyer_names - {buyer_name}) if all_buyer_names else None
+            conv_data = await extract_chat_messages(
+                browser_session, buyer_name=display_name, other_buyers=other_buyers
+            )
 
-                conv_data = await extract_chat_messages(browser_session)
-
-                # Deduplicate by listing title (only check against OTHER convos)
-                dedup_key = conv_data.listing_title.lower().strip()
-                if not listing_key_set and dedup_key:
-                    if dedup_key in handled_listings:
-                        logger.info(
-                            f"Already handled '{conv_data.listing_title}' this cycle, "
-                            f"skipping {buyer_name}"
-                        )
-                        return None
-                    handled_listings.add(dedup_key)
-                    listing_key_set = True
-
-                logger.info(
-                    f"Chat popup for {buyer_name}: {len(conv_data.messages)} messages, "
-                    f"listing='{conv_data.listing_title}'"
+            # Validate extracted buyer matches expected — prevents cross-talk
+            logger.info(
+                f"[handle_conversation] COMPARE: preview_buyer='{buyer_name}' vs "
+                f"extracted_buyer='{conv_data.buyer_name}' (display='{conv_data.display_name}')"
+            )
+            if conv_data.buyer_name and conv_data.buyer_name != buyer_name:
+                logger.warning(
+                    f"[handle_conversation] BUYER MISMATCH: expected '{buyer_name}' but extracted "
+                    f"'{conv_data.buyer_name}' — closing and skipping"
                 )
+                await close_all_popups(browser_session)
+                return None
 
-                if not conv_data.messages:
-                    await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
-                    continue
+            logger.info(
+                f"[handle_conversation] Conversation {buyer_name}: {len(conv_data.messages)} messages, "
+                f"listing='{conv_data.listing_title}'"
+            )
 
-                # Check payment status for confirmed deals (even without new messages)
-                payment_result = await self._check_payment_status(
-                    browser_session, buyer_name, conv_data
-                )
-                if payment_result == "sold":
-                    result = "sold"
-                    break
+            if not conv_data.messages:
+                await close_all_popups(browser_session)
+                return None
 
-                # Last message is from seller, waiting for buyer reply
-                if not conv_data.messages[-1].is_from_buyer:
-                    logger.info(f"Last message for {buyer_name} is from seller, waiting...")
-                    await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
-                    continue
+            # Check payment status for confirmed deals
+            payment_result = await self._check_payment_status(
+                browser_session, buyer_name, conv_data
+            )
+            if payment_result == "sold":
+                return "sold"
 
-                # Process messages against DB
-                action = await self._process_messages(
-                    browser_session, buyer_name, conv_data
-                )
+            # Last message is from seller — nothing to do
+            if not conv_data.messages[-1].is_from_buyer:
+                logger.info(f"Last message for {buyer_name} is from seller, skipping")
+                await close_all_popups(browser_session)
+                return None
 
-                if action == "sold":
-                    result = "sold"
-                    break
-                elif action == "responded":
-                    last_activity = time.time()
-                    await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
-                    continue
-                else:
-                    # No new messages (all already in DB)
-                    await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
-                    continue
+            # Process messages against DB
+            result = await self._process_messages(
+                browser_session, buyer_name, conv_data
+            )
+
+            # Always close popups after handling, then refresh if we responded
+            await close_all_popups(browser_session)
+            if result == "responded" or result == "sold":
+                await refresh_inbox(browser_session)
+
+            return result
 
         except Exception as e:
-            logger.error(f"Error in watch loop for {buyer_name}: {e}")
-        finally:
-            if result != "sold":
-                await close_chat_popup(browser_session)
-
-        return result
+            logger.error(f"Error handling conversation for {buyer_name}: {e}")
+            await close_all_popups(browser_session)
+            return None
 
     async def _process_messages(
         self, browser_session, buyer_name: str, conv_data
     ) -> str | None:
         """Process extracted messages: diff against DB, generate AI response.
 
-        Returns:
-            "sold" - payment confirmed, thank-you sent
-            "responded" - we sent a response to new messages
-            None - no new messages to respond to
+        Returns: "sold", "responded", or None
         """
         async with async_session() as db:
             buyer = await BuyerService.get_or_create(db, fb_name=buyer_name)
@@ -300,6 +322,30 @@ class MessageMonitor:
             # Skip if listing already sold
             if conversation.status == "sold":
                 return None
+
+            # Reopen closed/declined conversations if buyer messages again
+            if conversation.status == "closed":
+                # Check if another buyer already has a pending deal on this listing
+                if listing_id and await ConversationService.has_pending_deal(db, listing_id):
+                    # Someone else agreed — tell this buyer
+                    response_text = (
+                        "sorry someone just grabbed this, ill lmk if it falls through. bye buy!"
+                    )
+                    sent = await browser_send_message(browser_session, response_text, buyer_name=buyer_name)
+                    await ConversationService.add_message(
+                        db,
+                        conversation_id=conversation.id,
+                        role="seller",
+                        content=response_text,
+                        delivered=sent,
+                    )
+                    return "responded"
+                else:
+                    await ConversationService.update_status(
+                        db, conversation.id, "active"
+                    )
+                    conversation.status = "active"
+                    logger.info(f"Reopened closed conversation for {buyer_name}")
 
             # Check if payment came through for confirmed deals
             if conversation.status == "confirmed":
@@ -345,7 +391,7 @@ class MessageMonitor:
                     "ay sorry someone already grabbed this one, "
                     "appreciate you reaching out tho. bye buy!"
                 )
-                sent = await browser_send_message(browser_session, response_text)
+                sent = await browser_send_message(browser_session, response_text, buyer_name=buyer_name)
                 await ConversationService.add_message(
                     db,
                     conversation_id=conversation.id,
@@ -358,6 +404,17 @@ class MessageMonitor:
                 )
                 return "responded"
 
+            # Query competing offers from other buyers on the same listing
+            competing_offer = None
+            if listing_id:
+                competing_offer = await ConversationService.get_competing_offer(
+                    db, listing_id, conversation.id
+                )
+                if competing_offer:
+                    logger.info(
+                        f"Competing offer for {buyer_name}: ${competing_offer:.0f}"
+                    )
+
             # Generate AI response
             all_messages = await ConversationService.get_messages(
                 db, conversation.id, limit=50
@@ -369,6 +426,8 @@ class MessageMonitor:
                 conversation_status=conversation.status,
                 new_buyer_messages=new_contents,
                 agreed_price=conversation.agreed_price,
+                competing_offer=competing_offer,
+                delivery_address=conversation.delivery_address,
             )
 
             if not ai_result:
@@ -381,7 +440,7 @@ class MessageMonitor:
             )
 
             # Send AI response
-            sent = await browser_send_message(browser_session, ai_result.message)
+            sent = await browser_send_message(browser_session, ai_result.message, buyer_name=buyer_name)
             logger.info(
                 f"Message send {'succeeded' if sent else 'FAILED'} for {buyer_name}"
             )
@@ -393,6 +452,15 @@ class MessageMonitor:
                 content=ai_result.message,
                 delivered=sent,
             )
+
+            # Store buyer's offer if extracted
+            if ai_result.buyer_offer is not None:
+                await ConversationService.update_offer(
+                    db, conversation.id, ai_result.buyer_offer
+                )
+                logger.info(
+                    f"Stored buyer offer for {buyer_name}: ${ai_result.buyer_offer:.0f}"
+                )
 
             # Handle deal status
             if ai_result.deal_status == "agreed":
@@ -411,11 +479,22 @@ class MessageMonitor:
                     db, conversation.id, "pending"
                 )
 
+                # Close competing conversations on this listing
+                if listing_id:
+                    closed_count = await ConversationService.close_competing_conversations(
+                        db, listing_id, conversation.id
+                    )
+                    if closed_count:
+                        logger.info(
+                            f"Closed {closed_count} competing conversation(s) "
+                            f"on listing '{listing.title}'"
+                        )
+
             elif ai_result.deal_status == "address_received":
                 delivery_address = ai_result.delivery_address
                 if delivery_address:
                     logger.info(
-                        f"ADDRESS RECEIVED: "
+                        f"ADDRESS RECEIVED (awaiting confirmation): "
                         f"{listing.title if listing else 'Unknown'} - "
                         f"Buyer: {buyer_name} - Address: {delivery_address}"
                     )
@@ -423,31 +502,42 @@ class MessageMonitor:
                         db, conversation.id, delivery_address=delivery_address
                     )
                     await ConversationService.update_status(
-                        db, conversation.id, "confirmed"
+                        db, conversation.id, "awaiting_confirm"
                     )
-
-                    # Create checkout session and send payment link in chat
-                    try:
-                        from ..services.payment_service import PaymentService
-                        txn = await PaymentService.create_checkout(db, conversation.id)
-                        if txn and txn.checkout_url:
-                            price_str = f"{conversation.agreed_price:.0f}" if conversation.agreed_price else "the agreed amount"
-                            payment_msg = f"here's the payment link for ${price_str}: {txn.checkout_url}"
-                            sent = await browser_send_message(browser_session, payment_msg)
-                            await ConversationService.add_message(
-                                db,
-                                conversation_id=conversation.id,
-                                role="seller",
-                                content=payment_msg,
-                                delivered=sent,
-                            )
-                            logger.info(f"Payment link sent to {buyer_name}: {txn.checkout_url}")
-                    except Exception as e:
-                        logger.error(f"Failed to create checkout for conversation {conversation.id}: {e}")
                 else:
                     logger.warning(
                         f"address_received but no address extracted for {buyer_name}"
                     )
+
+            elif ai_result.deal_status == "address_confirmed":
+                logger.info(
+                    f"ADDRESS CONFIRMED: "
+                    f"{listing.title if listing else 'Unknown'} - "
+                    f"Buyer: {buyer_name}"
+                )
+                await ConversationService.update_status(
+                    db, conversation.id, "confirmed"
+                )
+                self._awaiting_payment.add(buyer_name)
+
+                # Create checkout session and send payment link in chat
+                try:
+                    from ..services.payment_service import PaymentService
+                    txn = await PaymentService.create_checkout(db, conversation.id)
+                    if txn and txn.checkout_url:
+                        price_str = f"{conversation.agreed_price:.0f}" if conversation.agreed_price else "the agreed amount"
+                        payment_msg = f"here's the payment link for ${price_str}: {txn.checkout_url}"
+                        sent = await browser_send_message(browser_session, payment_msg, buyer_name=buyer_name)
+                        await ConversationService.add_message(
+                            db,
+                            conversation_id=conversation.id,
+                            role="seller",
+                            content=payment_msg,
+                            delivered=sent,
+                        )
+                        logger.info(f"Payment link sent to {buyer_name}: {txn.checkout_url}")
+                except Exception as e:
+                    logger.error(f"Failed to create checkout for conversation {conversation.id}: {e}")
 
             elif ai_result.deal_status == "declined":
                 logger.info(
@@ -542,7 +632,7 @@ class MessageMonitor:
 
         # Send thank-you message
         thank_msg = "payment received, appreciate it! bye buy!"
-        sent = await browser_send_message(browser_session, thank_msg)
+        sent = await browser_send_message(browser_session, thank_msg, buyer_name=buyer_name)
         await ConversationService.add_message(
             db,
             conversation_id=conversation.id,

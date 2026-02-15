@@ -7,18 +7,6 @@ logger = logging.getLogger(__name__)
 MARKETPLACE_INBOX_URL = "https://www.facebook.com/marketplace/inbox"
 
 
-def _unwrap_yes_no(result) -> str:
-    """Unwrap a yes/no extract result into a lowercase string."""
-    data = result.data if hasattr(result, "data") else result
-    if hasattr(data, "result"):
-        data = data.result
-    if isinstance(data, dict):
-        for key in ("popups_open", "popup_open"):
-            if key in data:
-                return str(data[key]).lower()
-    return str(data).lower()
-
-
 async def navigate_to_marketplace(session) -> bool:
     """Navigate to Facebook Marketplace inbox."""
     try:
@@ -31,174 +19,109 @@ async def navigate_to_marketplace(session) -> bool:
         return False
 
 
-async def _activate_chat_system(session) -> None:
-    """Click the Messenger chat bubble and close it to activate the chat system.
-    Some accounts need this before chat popups will open."""
+async def refresh_inbox(session) -> bool:
+    """Refresh the Marketplace inbox page to check for new messages."""
     try:
-        logger.info("Activating chat system via Messenger bubble...")
-        await session.act(
-            input="Click the small circular Messenger chat icon in the bottom right corner of the page.",
-        )
-        await asyncio.sleep(1)
-        await session.act(
-            input="Close the Messenger chat panel that just opened.",
-        )
-        await asyncio.sleep(1)
-        logger.info("Chat system activated")
-    except Exception as e:
-        logger.warning(f"Failed to activate chat system: {e}")
-
-
-async def close_all_chat_popups(session) -> bool:
-    """Close all open chat popups. Safe to call when none are open."""
-    try:
-        result = await session.extract(
-            instruction="Are there any chat popups open in the bottom right corner of the screen? Answer 'yes' or 'no'.",
-            schema={
-                "type": "object",
-                "properties": {"popups_open": {"type": "string"}},
-                "required": ["popups_open"],
-            },
-        )
-        if "no" in _unwrap_yes_no(result):
-            return True
-
-        logger.info("Closing all open chat popups...")
-        await session.act(
-            input="Close ALL chat popups that are open at the bottom of the screen by clicking the X button on each one.",
-        )
-        await asyncio.sleep(1)
+        await session.navigate(url=MARKETPLACE_INBOX_URL)
+        await asyncio.sleep(2)
         return True
     except Exception as e:
-        logger.warning(f"Failed to close all chat popups: {e}")
+        logger.error(f"Failed to refresh inbox: {e}")
         return False
 
 
 async def click_conversation(session, buyer_name: str) -> bool:
-    """Click on a conversation in the Marketplace inbox.
-    This opens a chat popup in the bottom right corner.
-    If the popup doesn't open, activates the chat system and retries.
-    Returns False if popup never opens."""
-    try:
-        logger.info(f"Clicking conversation for '{buyer_name}'...")
+    """Click on a conversation row in the Marketplace inbox list.
 
-        await session.act(
+    This selects the conversation and shows its messages in the
+    right panel of the inbox page. No popups are opened.
+    """
+    try:
+        logger.info(f"[click_conversation] Clicking conversation for '{buyer_name}'...")
+        result = await session.act(
             input=(
-                f"Click on the conversation row that contains the name "
-                f"'{buyer_name}'. It is a button element in the main content "
-                f"area of the Facebook Marketplace inbox."
+                f"This is the Facebook Marketplace inbox page. There is a list of "
+                f"conversation rows — each row contains a person's name, a listing "
+                f"title, and a message preview. Find the row that contains the name "
+                f"'{buyer_name}' and click on it. Do NOT click any other buttons, "
+                f"icons, or links on the page."
             ),
         )
-
-        await asyncio.sleep(2)
-
-        # Check if chat popup opened
-        try:
-            result = await session.extract(
-                instruction="Is there a chat popup open in the bottom right corner of the screen? Answer with just 'yes' or 'no'.",
-                schema={
-                    "type": "object",
-                    "properties": {"popup_open": {"type": "string"}},
-                    "required": ["popup_open"],
-                },
-            )
-            popup_open = _unwrap_yes_no(result)
-        except Exception:
-            popup_open = "yes"  # assume it worked if we can't check
-
-        if "no" in popup_open:
-            logger.info("Chat popup didn't open, activating chat system and retrying...")
-            await _activate_chat_system(session)
-            await asyncio.sleep(1)
-
-            # Retry clicking the conversation
-            await session.act(
-                input=(
-                    f"Click on the conversation row that contains the name "
-                    f"'{buyer_name}'. It is a button element in the main content "
-                    f"area of the Facebook Marketplace inbox."
-                ),
-            )
-            await asyncio.sleep(2)
-
-            # Verify popup opened after retry
-            try:
-                result = await session.extract(
-                    instruction="Is there a chat popup open in the bottom right corner of the screen? Answer with just 'yes' or 'no'.",
-                    schema={
-                        "type": "object",
-                        "properties": {"popup_open": {"type": "string"}},
-                        "required": ["popup_open"],
-                    },
-                )
-                if "no" in _unwrap_yes_no(result):
-                    logger.error(f"Popup still didn't open for {buyer_name} after retry")
-                    return False
-            except Exception:
-                pass  # assume it worked
-
-        logger.info(f"Clicked conversation for '{buyer_name}'")
+        logger.debug(f"[click_conversation] act() result: {result}")
+        await asyncio.sleep(0.5)
+        logger.info(f"[click_conversation] Done clicking for '{buyer_name}'")
         return True
     except Exception as e:
         logger.error(f"Failed to click conversation for {buyer_name}: {e}")
         return False
 
 
-async def send_message(session, message: str) -> bool:
-    """Type and send a message in the chat popup."""
+async def close_all_popups(session) -> None:
+    """Close any popups or overlays that may have appeared on screen."""
     try:
-        delay = random.uniform(1, 3)
-        logger.info(f"Waiting {delay:.1f}s before typing (anti-detection)")
-        await asyncio.sleep(delay)
-
-        # Step 1: Click the input field and type the message
-        await session.act(
+        logger.debug("[close_all_popups] Closing any open popups...")
+        result = await session.act(
             input=(
-                f"Click on the message input field in the chat popup at the "
-                f"bottom right of the screen and type this message: {message}"
+                "Look for any open chat popup windows or dialog boxes on the page. "
+                "If any are open, click the X or close button on each one to close them. "
+                "If none are open, do nothing."
             ),
         )
+        logger.debug(f"[close_all_popups] act() result: {result}")
         await asyncio.sleep(1)
-
-        # Step 2: Press Enter to send the message
-        await session.act(
-            input="Press the Enter key to send the message that was just typed in the chat input field.",
-        )
-        await asyncio.sleep(1)
-        return True
     except Exception as e:
-        logger.error(f"Failed to send message: {e}")
-        return False
+        logger.warning(f"[close_all_popups] Failed: {e}")
 
 
-async def close_chat_popup(session) -> bool:
-    """Close the chat popup with verification and retry."""
+async def send_message(session, message: str, buyer_name: str = "") -> bool:
+    """Type and send a message in the conversation panel.
+
+    Args:
+        session: Stagehand browser session.
+        message: The message text to send.
+        buyer_name: Name of the buyer whose chat we're sending to.
+            Used to dismiss any other notification popups first.
+    """
     try:
+        # Dismiss any notification popups from OTHER conversations that may
+        # have appeared while we were processing. These can steal focus and
+        # cause the message to be typed into the wrong chat.
+        logger.info(f"[send_message] Closing notification popups before sending to '{buyer_name}'...")
         await session.act(
-            input="Click the X or close button on the chat popup header to close it.",
+            input=(
+                "Look for any small chat notification popups or chat bubbles on "
+                "the page that may have appeared from other conversations. If any "
+                "are visible, click the X or close button on each one to dismiss "
+                "them. Do NOT close the main chat panel or conversation view. "
+                "If there are no notification popups, do nothing."
+            ),
         )
+        await asyncio.sleep(0.5)
+
+        delay = random.uniform(0.3, 0.8)
+        logger.info(f"[send_message] Waiting {delay:.1f}s before typing, message='{message[:80]}...'")
+        await asyncio.sleep(delay)
+
+        buyer_hint = f" for the conversation with '{buyer_name}'" if buyer_name else ""
+        logger.debug(f"[send_message] Typing message into chat{buyer_hint}...")
+        type_result = await session.act(
+            input=(
+                f"Find the message input field (text box where you type a message) "
+                f"in the chat panel{buyer_hint} and click on it. "
+                f"Then type this message: {message}"
+            ),
+        )
+        logger.debug(f"[send_message] type act() result: {type_result}")
         await asyncio.sleep(1)
 
-        # Verify popup closed
-        try:
-            result = await session.extract(
-                instruction="Is there a chat popup open in the bottom right corner of the screen? Answer with just 'yes' or 'no'.",
-                schema={
-                    "type": "object",
-                    "properties": {"popup_open": {"type": "string"}},
-                    "required": ["popup_open"],
-                },
-            )
-            if "yes" in _unwrap_yes_no(result):
-                logger.warning("Popup still open after close, retrying...")
-                await session.act(
-                    input="Click the X or close button on the chat popup to close it.",
-                )
-                await asyncio.sleep(1)
-        except Exception:
-            pass  # verification failed, assume it closed
-
+        logger.debug("[send_message] Pressing Enter to send...")
+        send_result = await session.act(
+            input="Press the Enter key to send the message that was just typed.",
+        )
+        logger.debug(f"[send_message] enter act() result: {send_result}")
+        await asyncio.sleep(1)
+        logger.info("[send_message] Message sent successfully")
         return True
     except Exception as e:
-        logger.error(f"Failed to close chat popup: {e}")
+        logger.error(f"[send_message] Failed: {e}")
         return False

@@ -4,12 +4,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.buyer import Buyer
 
 
+def _normalize_name(name: str) -> str:
+    """Normalize a name for consistent DB matching."""
+    name = name.lower().strip()
+    name = " ".join(name.split())
+    name = name.rstrip(".")
+    return name
+
+
 class BuyerService:
     @staticmethod
     async def get_or_create(
         session: AsyncSession, fb_name: str, fb_profile_url: str | None = None
     ) -> Buyer:
         """Get existing buyer by name or create a new one."""
+        fb_name = _normalize_name(fb_name)
         result = await session.execute(
             select(Buyer).where(Buyer.fb_name == fb_name)
         )

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -158,6 +158,66 @@ class ConversationService:
             .offset(offset)
         )
         return list(result.scalars().all())
+
+    @staticmethod
+    async def update_offer(
+        session: AsyncSession, conversation_id: int, offer: float
+    ) -> None:
+        """Update current_offer to the buyer's latest offer."""
+        result = await session.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
+        )
+        conversation = result.scalar_one_or_none()
+        if not conversation:
+            return
+        conversation.current_offer = offer
+        await session.commit()
+
+    @staticmethod
+    async def get_competing_offer(
+        session: AsyncSession, listing_id: int, exclude_conversation_id: int
+    ) -> float | None:
+        """Return the highest current_offer from other active conversations on the same listing."""
+        result = await session.execute(
+            select(func.max(Conversation.current_offer)).where(
+                Conversation.listing_id == listing_id,
+                Conversation.id != exclude_conversation_id,
+                Conversation.status.in_(["active", "pending"]),
+                Conversation.current_offer.isnot(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def close_competing_conversations(
+        session: AsyncSession, listing_id: int, winning_conversation_id: int
+    ) -> int:
+        """Close all other active conversations on a listing when one buyer agrees."""
+        result = await session.execute(
+            select(Conversation).where(
+                Conversation.listing_id == listing_id,
+                Conversation.id != winning_conversation_id,
+                Conversation.status.in_(["active"]),
+            )
+        )
+        conversations = list(result.scalars().all())
+        for conv in conversations:
+            conv.status = "closed"
+        await session.commit()
+        return len(conversations)
+
+    @staticmethod
+    async def has_pending_deal(
+        session: AsyncSession, listing_id: int
+    ) -> bool:
+        """Check if any conversation on this listing is in pending/confirmed status."""
+        result = await session.execute(
+            select(Conversation.id).where(
+                Conversation.listing_id == listing_id,
+                Conversation.status.in_(["pending", "confirmed"]),
+            ).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
 
     @staticmethod
     async def get_active_conversations(session: AsyncSession) -> list[Conversation]:

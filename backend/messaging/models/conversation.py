@@ -18,6 +18,7 @@ class Conversation(Base):
     status: Mapped[str] = mapped_column(String(20), default="active")
     agreed_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     delivery_address: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    current_offer: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_message_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )

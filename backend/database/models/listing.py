@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Float, DateTime, Boolean
+from sqlalchemy import String, Float, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from typing import Optional
 
@@ -14,7 +14,7 @@ class Listing(Base):
     description: Mapped[str] = mapped_column(String, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)
     min_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    willing_to_negotiate: Mapped[bool] = mapped_column(Boolean, default=True)
+    willing_to_negotiate: Mapped[float] = mapped_column(Float, default=0.5)
     seller_notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     condition: Mapped[str] = mapped_column(String(20), default="good")
     location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
