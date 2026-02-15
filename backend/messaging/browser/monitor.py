@@ -236,6 +236,14 @@ class MessageMonitor:
                     await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
                     continue
 
+                # Check payment status for confirmed deals (even without new messages)
+                payment_result = await self._check_payment_status(
+                    browser_session, buyer_name, conv_data
+                )
+                if payment_result == "sold":
+                    result = "sold"
+                    break
+
                 # Last message is from seller, waiting for buyer reply
                 if not conv_data.messages[-1].is_from_buyer:
                     logger.info(f"Last message for {buyer_name} is from seller, waiting...")
@@ -461,10 +469,30 @@ class MessageMonitor:
 
             return "responded"
 
+    async def _check_payment_status(
+        self, browser_session, buyer_name: str, conv_data
+    ) -> str | None:
+        """Check if a confirmed deal has been paid, independent of new messages.
+
+        Returns "sold" if payment went through, None otherwise.
+        """
+        async with async_session() as db:
+            buyer = await BuyerService.get_or_create(db, fb_name=buyer_name)
+            listing = await MatchingService.match_listing(db, conv_data.listing_title)
+            listing_id = listing.id if listing else None
+            conversation = await ConversationService.get_or_create(
+                db, buyer_id=buyer.id, listing_id=listing_id
+            )
+            if conversation.status != "confirmed":
+                return None
+            return await self._check_payment_and_thank(
+                db, browser_session, conversation, listing, buyer_name
+            )
+
     async def _check_payment_and_thank(
         self, db, browser_session, conversation, listing, buyer_name: str
     ) -> str | None:
-        """Check if buyer has paid and send thank-you message.
+        """Check if buyer has paid (polling Stripe directly) and send thank-you.
 
         Returns "sold" if payment confirmed and thank-you sent, None otherwise.
         """
@@ -475,7 +503,28 @@ class MessageMonitor:
         )
         txn = result.scalar_one_or_none()
 
-        if not txn or txn.status != "payment_held":
+        if not txn:
+            return None
+
+        # If webhook already updated it, great. Otherwise check Stripe directly.
+        if txn.status == "pending" and txn.stripe_checkout_session_id:
+            try:
+                import stripe
+                from ..config import settings
+                stripe.api_key = settings.stripe_secret_key
+                stripe_session = stripe.checkout.Session.retrieve(txn.stripe_checkout_session_id)
+                if stripe_session.payment_status == "paid":
+                    from datetime import datetime
+                    txn.stripe_payment_intent_id = stripe_session.payment_intent
+                    txn.status = "payment_held"
+                    txn.paid_at = datetime.utcnow()
+                    txn.updated_at = datetime.utcnow()
+                    await db.commit()
+                    logger.info(f"Payment confirmed via Stripe polling for transaction {txn.id}")
+            except Exception as e:
+                logger.error(f"Failed to check Stripe session: {e}")
+
+        if txn.status != "payment_held":
             return None
 
         logger.info(
