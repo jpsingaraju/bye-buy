@@ -1,5 +1,8 @@
 """Seed default listings and conversations into the database."""
 
+import shutil
+from pathlib import Path
+
 from sqlalchemy import select, func
 
 from .connection import async_session
@@ -29,15 +32,44 @@ DEFAULT_LISTINGS = [
 ]
 
 
+SEED_IMAGES = {
+    "Airpod Pro 2nd Generation": ["airpods_1.jpg", "airpods_2.jpg"],
+    "Home Office Chair [PERFECT CONDITION]": ["chair_1.jpg", "chair_2.jpg", "chair_3.jpg"],
+}
+
+
 async def seed_default_listings():
-    """Insert default listings if they don't already exist."""
+    """Insert default listings with images if they don't already exist."""
+    from posting.models import ListingImage
+    from posting.config import settings
+
     async with async_session() as db:
         for listing_data in DEFAULT_LISTINGS:
             result = await db.execute(
                 select(Listing).where(Listing.title == listing_data["title"])
             )
             if result.scalar_one_or_none() is None:
-                db.add(Listing(**listing_data))
+                listing = Listing(**listing_data)
+                db.add(listing)
+                await db.flush()
+
+                # Copy seed images from frontend/public/ to uploads/
+                image_names = SEED_IMAGES.get(listing_data["title"], [])
+                frontend_public = Path(__file__).parent.parent.parent / "frontend" / "public"
+                upload_dir = settings.upload_dir
+                upload_dir.mkdir(parents=True, exist_ok=True)
+
+                for position, img_name in enumerate(image_names):
+                    src = frontend_public / img_name
+                    if src.exists():
+                        dest = upload_dir / img_name
+                        shutil.copy2(src, dest)
+                        db.add(ListingImage(
+                            listing_id=listing.id,
+                            filename=img_name,
+                            filepath=str(dest),
+                            position=position,
+                        ))
         await db.commit()
 
 

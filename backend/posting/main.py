@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api.router import router
 from database.connection import Base, engine
+from database.seed import seed_default_listings
 from .config import settings
 from .queue.worker import worker
 
@@ -21,6 +22,9 @@ async def lifespan(app: FastAPI):
     # Startup: initialize database
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Seed default data
+    await seed_default_listings()
 
     # Ensure upload directory exists
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
