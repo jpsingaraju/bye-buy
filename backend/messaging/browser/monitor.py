@@ -5,8 +5,11 @@ import time
 from collections import deque
 from datetime import datetime
 
+from sqlalchemy import select
+
 from database.connection import async_session
 from database.models.listing import Listing
+from ..models.transaction import Transaction
 from ..services.buyer_service import BuyerService
 from ..services.conversation_service import ConversationService
 from ..services.matching_service import MatchingService
@@ -79,7 +82,7 @@ class MessageMonitor:
           keep it open and re-extract every 5-10s, respond to new messages
         - Close popup after 2 min inactivity (no new buyer messages)
         - After handling all conversations: wait 30-60s, refresh inbox
-        - If deal completes: notify remaining buyers, close session
+        - If item sells: send thank-you, close session, shut down
         """
         while self.running:
             try:
@@ -91,7 +94,6 @@ class MessageMonitor:
                     self._on_inbox = False
                     logger.info("Deal completed, shutting down service")
                     self.running = False
-                    # Shut down the uvicorn process
                     import os
                     import signal
                     os.kill(os.getpid(), signal.SIGINT)
@@ -136,7 +138,7 @@ class MessageMonitor:
         """Single poll cycle.
 
         Returns:
-            "deal_completed" - a deal was completed, session closed
+            "deal_completed" - item sold, session closed
             "empty" - no conversations found
             "handled" - conversations were handled
         """
@@ -159,7 +161,6 @@ class MessageMonitor:
         logger.info(f"Checking {len(targets)} conversations")
 
         handled_listings = set()
-        deal_completed = False
 
         for conv_preview in targets:
             try:
@@ -167,17 +168,14 @@ class MessageMonitor:
                     session, conv_preview, handled_listings
                 )
                 if result == "sold":
-                    deal_completed = True
+                    logger.info("Item sold, closing Browserbase session")
+                    await close_session()
+                    self._on_inbox = False
+                    return "deal_completed"
             except Exception as e:
                 error_msg = f"Error handling {conv_preview.buyer_name}: {e}"
                 logger.error(error_msg)
                 self.recent_errors.append(error_msg)
-
-        if deal_completed:
-            logger.info("All buyers notified, closing Browserbase session")
-            await close_session()
-            self._on_inbox = False
-            return "deal_completed"
 
         return "handled"
 
@@ -189,7 +187,7 @@ class MessageMonitor:
         Re-extracts every 5-10s. Closes popup after 2 min of no new buyer
         messages, or when deal completes/fails.
 
-        Returns "sold" if listing was sold, None otherwise.
+        Returns "sold" if payment confirmed, None otherwise.
         """
         buyer_name = conv_preview.buyer_name
 
@@ -275,7 +273,7 @@ class MessageMonitor:
         """Process extracted messages: diff against DB, generate AI response.
 
         Returns:
-            "sold" - listing was sold (address received)
+            "sold" - payment confirmed, thank-you sent
             "responded" - we sent a response to new messages
             None - no new messages to respond to
         """
@@ -294,6 +292,14 @@ class MessageMonitor:
             # Skip if listing already sold
             if conversation.status == "sold":
                 return None
+
+            # Check if payment came through for confirmed deals
+            if conversation.status == "confirmed":
+                result = await self._check_payment_and_thank(
+                    db, browser_session, conversation, listing, buyer_name
+                )
+                if result:
+                    return result
 
             # DB diff: find truly new messages
             existing_messages = await ConversationService.get_messages(
@@ -342,7 +348,7 @@ class MessageMonitor:
                 await ConversationService.update_status(
                     db, conversation.id, "closed"
                 )
-                return None
+                return "responded"
 
             # Generate AI response
             all_messages = await ConversationService.get_messages(
@@ -394,7 +400,7 @@ class MessageMonitor:
                     db, conversation.id, agreed_price=agreed_price
                 )
                 await ConversationService.update_status(
-                    db, conversation.id, "pending_address"
+                    db, conversation.id, "pending"
                 )
 
             elif ai_result.deal_status == "address_received":
@@ -409,22 +415,27 @@ class MessageMonitor:
                         db, conversation.id, delivery_address=delivery_address
                     )
                     await ConversationService.update_status(
-                        db, conversation.id, "sold"
+                        db, conversation.id, "confirmed"
                     )
-                    if listing:
-                        listing.status = "sold"
-                        await db.commit()
 
-                    # Create checkout session and send payment link
+                    # Create checkout session and send payment link in chat
                     try:
                         from ..services.payment_service import PaymentService
                         txn = await PaymentService.create_checkout(db, conversation.id)
                         if txn and txn.checkout_url:
-                            logger.info(f"Payment link created for conversation {conversation.id}: {txn.checkout_url}")
+                            price_str = f"{conversation.agreed_price:.0f}" if conversation.agreed_price else "the agreed amount"
+                            payment_msg = f"here's the payment link for ${price_str}: {txn.checkout_url}"
+                            sent = await browser_send_message(browser_session, payment_msg)
+                            await ConversationService.add_message(
+                                db,
+                                conversation_id=conversation.id,
+                                role="seller",
+                                content=payment_msg,
+                                delivered=sent,
+                            )
+                            logger.info(f"Payment link sent to {buyer_name}: {txn.checkout_url}")
                     except Exception as e:
                         logger.error(f"Failed to create checkout for conversation {conversation.id}: {e}")
-
-                    return "sold"
                 else:
                     logger.warning(
                         f"address_received but no address extracted for {buyer_name}"
@@ -449,6 +460,50 @@ class MessageMonitor:
                 )
 
             return "responded"
+
+    async def _check_payment_and_thank(
+        self, db, browser_session, conversation, listing, buyer_name: str
+    ) -> str | None:
+        """Check if buyer has paid and send thank-you message.
+
+        Returns "sold" if payment confirmed and thank-you sent, None otherwise.
+        """
+        result = await db.execute(
+            select(Transaction).where(
+                Transaction.conversation_id == conversation.id
+            )
+        )
+        txn = result.scalar_one_or_none()
+
+        if not txn or txn.status != "payment_held":
+            return None
+
+        logger.info(
+            f"PAYMENT CONFIRMED: {listing.title if listing else 'Unknown'} - "
+            f"Buyer: {buyer_name}"
+        )
+
+        # Update conversation to accepted
+        await ConversationService.update_status(db, conversation.id, "accepted")
+
+        # Mark listing as sold
+        if listing:
+            listing.status = "sold"
+            await db.commit()
+
+        # Send thank-you message
+        thank_msg = "payment received, appreciate it! bye buy!"
+        sent = await browser_send_message(browser_session, thank_msg)
+        await ConversationService.add_message(
+            db,
+            conversation_id=conversation.id,
+            role="seller",
+            content=thank_msg,
+            delivered=sent,
+        )
+
+        logger.info(f"Thank-you message sent to {buyer_name}")
+        return "sold"
 
 
 # Global monitor instance

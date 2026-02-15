@@ -70,7 +70,7 @@ def build_system_prompt(listing, conversation_status: str = "active", agreed_pri
         seller_notes=listing.seller_notes or "None",
     )
 
-    if conversation_status == "pending_address":
+    if conversation_status == "pending":
         price_str = f"{agreed_price:.0f}" if agreed_price else str(listing.price)
         prompt += PENDING_ADDRESS_ADDENDUM.replace("${agreed_price}", f"${price_str}")
 
