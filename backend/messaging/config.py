@@ -29,5 +29,9 @@ class Settings(BaseSettings):
     browserbase_context_id: str = ""
     model_api_key: str = ""
 
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_connected_account_id: str = ""
+
 
 settings = Settings()

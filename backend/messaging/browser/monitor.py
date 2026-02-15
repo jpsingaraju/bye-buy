@@ -415,6 +415,15 @@ class MessageMonitor:
                         listing.status = "sold"
                         await db.commit()
 
+                    # Create checkout session and send payment link
+                    try:
+                        from ..services.payment_service import PaymentService
+                        txn = await PaymentService.create_checkout(db, conversation.id)
+                        if txn and txn.checkout_url:
+                            logger.info(f"Payment link created for conversation {conversation.id}: {txn.checkout_url}")
+                    except Exception as e:
+                        logger.error(f"Failed to create checkout for conversation {conversation.id}: {e}")
+
                     return "sold"
                 else:
                     logger.warning(

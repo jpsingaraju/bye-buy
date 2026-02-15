@@ -8,6 +8,7 @@ from database.connection import Base, engine
 from database.seed import seed_default_listings
 from .api.router import router
 from .browser.monitor import monitor
+from .services.payment_worker import payment_worker
 
 # Import models so they register with Base
 from . import models  # noqa: F401
@@ -24,10 +25,13 @@ async def lifespan(app: FastAPI):
 
     await seed_default_listings()
     await monitor.start()
+    await payment_worker.start()
     logger.info("Messaging service started")
     yield
 
-    # Shutdown: stop monitor and cleanup
+    # Shutdown: stop worker and monitor, cleanup
+    if payment_worker._running:
+        await payment_worker.stop()
     if monitor.running:
         await monitor.stop()
     logger.info("Messaging service stopped")

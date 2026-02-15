@@ -3,5 +3,6 @@ from .conversation import Conversation
 from .message import Message
 from .browser_session import BrowserSession
 from .response_config import ResponseConfig
+from .transaction import Transaction
 
-__all__ = ["Buyer", "Conversation", "Message", "BrowserSession", "ResponseConfig"]
+__all__ = ["Buyer", "Conversation", "Message", "BrowserSession", "ResponseConfig", "Transaction"]

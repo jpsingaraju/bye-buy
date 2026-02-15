@@ -114,6 +114,31 @@ CREATE TABLE IF NOT EXISTS response_configs (
     FOREIGN KEY (listing_id) REFERENCES listings(id)
 );
 
+-- ============================================
+-- Transaction / escrow tables
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL UNIQUE,
+    listing_id INTEGER NOT NULL,
+    buyer_id INTEGER NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    stripe_checkout_session_id TEXT,
+    stripe_payment_intent_id TEXT,
+    stripe_transfer_id TEXT,
+    checkout_url TEXT,
+    tracking_number TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    paid_at TIMESTAMP,
+    shipped_at TIMESTAMP,
+    delivered_at TIMESTAMP,
+    paid_out_at TIMESTAMP,
+    refunded_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_listing_images_listing_id ON listing_images(listing_id);
 CREATE INDEX IF NOT EXISTS idx_posting_jobs_listing_id ON posting_jobs(listing_id);
@@ -123,3 +148,5 @@ CREATE INDEX IF NOT EXISTS idx_conversations_buyer_id ON conversations(buyer_id)
 CREATE INDEX IF NOT EXISTS idx_conversations_listing_id ON conversations(listing_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_conversation_id ON transactions(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
