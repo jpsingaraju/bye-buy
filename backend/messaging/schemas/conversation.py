@@ -31,6 +31,7 @@ class ConversationResponse(BaseModel):
     fb_thread_id: Optional[str] = None
     status: str
     agreed_price: Optional[float] = None
+    current_offer: Optional[float] = None
     delivery_address: Optional[str] = None
     last_message_at: Optional[datetime] = None
     created_at: datetime

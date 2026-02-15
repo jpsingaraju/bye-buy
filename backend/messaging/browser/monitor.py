@@ -195,9 +195,11 @@ class MessageMonitor:
                 result = await self._handle_conversation(
                     session, conv_preview, all_buyer_names
                 )
-                # Always store current preview after handling, whether we
-                # responded or not — prevents re-opening loops
-                self._last_seen_preview[conv_preview.buyer_name] = conv_preview.preview_text
+                # Only cache preview if we actually processed the conversation.
+                # If result is None due to buyer mismatch (wrong chat opened),
+                # don't cache — so we retry next cycle.
+                if result is not None:
+                    self._last_seen_preview[conv_preview.buyer_name] = conv_preview.preview_text
                 if result == "sold":
                     self._awaiting_payment.discard(conv_preview.buyer_name)
                     logger.info("Item sold, closing Browserbase session")
@@ -253,10 +255,19 @@ class MessageMonitor:
                 f"[handle_conversation] COMPARE: preview_buyer='{buyer_name}' vs "
                 f"extracted_buyer='{conv_data.buyer_name}' (display='{conv_data.display_name}')"
             )
-            if conv_data.buyer_name and conv_data.buyer_name != buyer_name:
+            extracted = conv_data.buyer_name
+            # Inbox often shows first name only ("anita") while chat shows
+            # full name ("anita moorthy") — accept if one starts with the other
+            names_match = (
+                not extracted
+                or extracted == buyer_name
+                or extracted.startswith(buyer_name)
+                or buyer_name.startswith(extracted)
+            )
+            if not names_match:
                 logger.warning(
                     f"[handle_conversation] BUYER MISMATCH: expected '{buyer_name}' but extracted "
-                    f"'{conv_data.buyer_name}' — closing and skipping"
+                    f"'{extracted}' — closing and skipping"
                 )
                 await close_all_popups(browser_session)
                 return None

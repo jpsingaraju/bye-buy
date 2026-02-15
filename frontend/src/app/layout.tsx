@@ -1,21 +1,25 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { Header } from "@/components/layout/Header";
+import { Space_Grotesk, Pacifico } from "next/font/google";
+import { LayoutShell } from "@/components/layout/LayoutShell";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const pacifico = Pacifico({
+  variable: "--font-wordmark",
   subsets: ["latin"],
+  weight: "400",
 });
+
 
 export const metadata: Metadata = {
-  title: "Bye-Buy - Multi-Platform Listing Automation",
-  description: "Automatically post listings to Facebook Marketplace, eBay, and Craigslist",
+  title: "bye! buy! — sell anything, automatically",
+  description:
+    "Our AI agents post your item across every major platform, filter out scammers, negotiate the best price, and guarantee instant payment. You just deliver.",
 };
 
 export default function RootLayout({
@@ -25,13 +29,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 dark:bg-black min-h-screen`}
-      >
-        <Header />
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {children}
-        </main>
+      <body className={`${spaceGrotesk.variable} ${pacifico.variable} font-sans antialiased bg-cream min-h-screen`}>
+        <LayoutShell>{children}</LayoutShell>
       </body>
     </html>
   );

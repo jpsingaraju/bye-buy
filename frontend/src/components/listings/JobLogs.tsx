@@ -9,10 +9,10 @@ interface JobLogsProps {
   jobId: number;
 }
 
-const levelColors = {
-  info: "text-blue-600 dark:text-blue-400",
-  warning: "text-yellow-600 dark:text-yellow-400",
-  error: "text-red-600 dark:text-red-400",
+const levelConfig: Record<string, { color: string; label: string }> = {
+  info: { color: "bg-sky text-ink", label: "INFO" },
+  warning: { color: "bg-orange text-ink", label: "WARN" },
+  error: { color: "bg-primary text-white", label: "ERR" },
 };
 
 export function JobLogs({ jobId }: JobLogsProps) {
@@ -27,36 +27,30 @@ export function JobLogs({ jobId }: JobLogsProps) {
     <div className="mt-2">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+        className="text-xs font-bold text-ink/40 hover:text-secondary transition-colors"
       >
-        {expanded ? "Hide logs" : "Show logs"}
+        {expanded ? "Hide logs ▲" : "Show logs ▼"}
       </button>
 
       {expanded && job?.logs && (
-        <div className="mt-2 space-y-1 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+        <div className="mt-2 space-y-1 pl-3 border-l-2 border-ink/20">
           {job.logs.length > 0 ? (
-            job.logs.map((log: JobLog) => (
-              <div key={log.id} className="text-sm">
-                <span className="text-gray-400 dark:text-gray-500 mr-2">
-                  {new Date(log.created_at).toLocaleTimeString()}
-                </span>
-                <span
-                  className={`font-medium mr-2 ${
-                    levelColors[log.level as keyof typeof levelColors] ||
-                    "text-gray-600"
-                  }`}
-                >
-                  [{log.level.toUpperCase()}]
-                </span>
-                <span className="text-gray-700 dark:text-gray-300">
-                  {log.message}
-                </span>
-              </div>
-            ))
+            job.logs.map((log: JobLog) => {
+              const config = levelConfig[log.level] || { color: "bg-muted text-white", label: log.level };
+              return (
+                <div key={log.id} className="text-xs flex items-start gap-2">
+                  <span className="text-ink/30 font-mono shrink-0">
+                    {new Date(log.created_at).toLocaleTimeString()}
+                  </span>
+                  <span className={`px-1.5 py-0 text-[10px] font-bold border border-ink ${config.color} shrink-0`}>
+                    {config.label}
+                  </span>
+                  <span className="text-ink/70 font-mono break-all">{log.message}</span>
+                </div>
+              );
+            })
           ) : (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              No logs available
-            </p>
+            <p className="text-xs text-ink/30 font-medium">No logs available</p>
           )}
         </div>
       )}

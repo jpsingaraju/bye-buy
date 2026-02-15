@@ -13,10 +13,11 @@ class ConversationService:
     async def get_all(
         session: AsyncSession,
         status: str | None = None,
+        listing_id: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Conversation]:
-        """Get all conversations with optional status filter."""
+        """Get all conversations with optional status and listing_id filters."""
         query = (
             select(Conversation)
             .options(selectinload(Conversation.buyer))
@@ -26,6 +27,8 @@ class ConversationService:
         )
         if status:
             query = query.where(Conversation.status == status)
+        if listing_id is not None:
+            query = query.where(Conversation.listing_id == listing_id)
 
         result = await session.execute(query)
         return list(result.scalars().all())

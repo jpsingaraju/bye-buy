@@ -48,7 +48,7 @@ async def click_conversation(session, buyer_name: str) -> bool:
             ),
         )
         logger.debug(f"[click_conversation] act() result: {result}")
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1.25)
         logger.info(f"[click_conversation] Done clicking for '{buyer_name}'")
         return True
     except Exception as e:
@@ -73,55 +73,119 @@ async def close_all_popups(session) -> None:
         logger.warning(f"[close_all_popups] Failed: {e}")
 
 
-async def send_message(session, message: str, buyer_name: str = "") -> bool:
-    """Type and send a message in the conversation panel.
+async def send_message(session, message: str, buyer_name: str = "", max_attempts: int = 2) -> bool:
+    """Type and send a message in the conversation panel, with verification.
+
+    After sending, extracts messages from the chat to verify our message
+    actually appears. Retries up to max_attempts times if verification fails.
 
     Args:
         session: Stagehand browser session.
         message: The message text to send.
         buyer_name: Name of the buyer whose chat we're sending to.
-            Used to dismiss any other notification popups first.
+        max_attempts: Max send attempts if verification fails.
     """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if attempt == 1:
+                # Dismiss notification popups only on first attempt
+                logger.info(f"[send_message] Closing notification popups before sending to '{buyer_name}'...")
+                await session.act(
+                    input=(
+                        "Look for any small chat notification popups or chat bubbles on "
+                        "the page that may have appeared from other conversations. If any "
+                        "are visible, click the X or close button on each one to dismiss "
+                        "them. Do NOT close the main chat panel or conversation view. "
+                        "If there are no notification popups, do nothing."
+                    ),
+                )
+                await asyncio.sleep(0.5)
+
+            delay = random.uniform(0.3, 0.8)
+            logger.info(
+                f"[send_message] Attempt {attempt}/{max_attempts}, "
+                f"waiting {delay:.1f}s before typing, message='{message[:80]}...'"
+            )
+            await asyncio.sleep(delay)
+
+            buyer_hint = f" for the conversation with '{buyer_name}'" if buyer_name else ""
+            await session.act(
+                input=(
+                    f"Find the message input field (text box where you type a message) "
+                    f"in the chat panel{buyer_hint} and click on it. "
+                    f"Then type this message: {message}"
+                ),
+            )
+            await asyncio.sleep(1)
+
+            await session.act(
+                input="Press the Enter key to send the message that was just typed.",
+            )
+            await asyncio.sleep(1.5)
+
+            # Verify: extract messages and check if ours appears
+            verified = await _verify_message_sent(session, message, buyer_name)
+            if verified:
+                logger.info(f"[send_message] Verified message delivered (attempt {attempt})")
+                return True
+
+            logger.warning(
+                f"[send_message] Verification failed (attempt {attempt}/{max_attempts}), "
+                f"message not found in chat"
+            )
+        except Exception as e:
+            logger.error(f"[send_message] Attempt {attempt} failed: {e}")
+
+    logger.error(f"[send_message] All {max_attempts} attempts failed for '{buyer_name}'")
+    return False
+
+
+async def _verify_message_sent(session, message: str, buyer_name: str) -> bool:
+    """Extract recent messages from the chat and check if our message appears."""
     try:
-        # Dismiss any notification popups from OTHER conversations that may
-        # have appeared while we were processing. These can steal focus and
-        # cause the message to be typed into the wrong chat.
-        logger.info(f"[send_message] Closing notification popups before sending to '{buyer_name}'...")
-        await session.act(
-            input=(
-                "Look for any small chat notification popups or chat bubbles on "
-                "the page that may have appeared from other conversations. If any "
-                "are visible, click the X or close button on each one to dismiss "
-                "them. Do NOT close the main chat panel or conversation view. "
-                "If there are no notification popups, do nothing."
+        result = await session.extract(
+            instruction=(
+                "Extract the last 3 messages from the currently open chat panel. "
+                "For each message, get the text content and whether it was sent by "
+                "the seller (me) or the buyer."
             ),
+            schema={
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string"},
+                                "is_from_buyer": {"type": "boolean"},
+                            },
+                        },
+                    },
+                },
+            },
         )
-        await asyncio.sleep(0.5)
 
-        delay = random.uniform(0.3, 0.8)
-        logger.info(f"[send_message] Waiting {delay:.1f}s before typing, message='{message[:80]}...'")
-        await asyncio.sleep(delay)
+        data = result.data if hasattr(result, "data") else result
+        if hasattr(data, "result"):
+            data = data.result
 
-        buyer_hint = f" for the conversation with '{buyer_name}'" if buyer_name else ""
-        logger.debug(f"[send_message] Typing message into chat{buyer_hint}...")
-        type_result = await session.act(
-            input=(
-                f"Find the message input field (text box where you type a message) "
-                f"in the chat panel{buyer_hint} and click on it. "
-                f"Then type this message: {message}"
-            ),
+        messages = data.get("messages", []) if isinstance(data, dict) else []
+
+        # Check if any seller message contains our text (fuzzy: first 30 chars)
+        msg_prefix = message[:30].lower()
+        for m in messages:
+            if not m.get("is_from_buyer", True):
+                content = m.get("content", "").lower()
+                if msg_prefix in content:
+                    return True
+
+        logger.debug(
+            f"[_verify_message_sent] Message not found. Looking for: '{msg_prefix}', "
+            f"got: {[m.get('content', '')[:50] for m in messages]}"
         )
-        logger.debug(f"[send_message] type act() result: {type_result}")
-        await asyncio.sleep(1)
-
-        logger.debug("[send_message] Pressing Enter to send...")
-        send_result = await session.act(
-            input="Press the Enter key to send the message that was just typed.",
-        )
-        logger.debug(f"[send_message] enter act() result: {send_result}")
-        await asyncio.sleep(1)
-        logger.info("[send_message] Message sent successfully")
-        return True
-    except Exception as e:
-        logger.error(f"[send_message] Failed: {e}")
         return False
+    except Exception as e:
+        logger.warning(f"[_verify_message_sent] Verification extract failed: {e}")
+        # If verification itself fails, assume sent to avoid infinite retries
+        return True

@@ -17,12 +17,13 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 @router.get("", response_model=list[ConversationResponse])
 async def list_conversations(
     status: str | None = None,
+    listing_id: int | None = None,
     limit: int = 50,
     offset: int = 0,
     session: AsyncSession = Depends(get_session),
 ):
     """List all conversations."""
-    return await ConversationService.get_all(session, status=status, limit=limit, offset=offset)
+    return await ConversationService.get_all(session, status=status, listing_id=listing_id, limit=limit, offset=offset)
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetailResponse)

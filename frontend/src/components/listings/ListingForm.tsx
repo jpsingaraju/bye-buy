@@ -16,17 +16,30 @@ interface ListingFormProps {
     price: number;
     condition?: ListingCondition;
     location?: string;
+    min_price?: number;
+    seller_notes?: string;
   };
   listingId?: number;
+  onSuccess?: () => void;
+  onCancel?: () => void;
 }
 
-export function ListingForm({ initialData, listingId }: ListingFormProps) {
+const CONDITIONS: { value: ListingCondition; label: string }[] = [
+  { value: "new", label: "New" },
+  { value: "like_new", label: "Like New" },
+  { value: "good", label: "Good" },
+  { value: "fair", label: "Fair" },
+];
+
+export function ListingForm({ initialData, listingId, onSuccess, onCancel }: ListingFormProps) {
   const router = useRouter();
   const [title, setTitle] = useState(initialData?.title || "");
   const [description, setDescription] = useState(initialData?.description || "");
   const [price, setPrice] = useState(initialData?.price?.toString() || "");
+  const [minPrice, setMinPrice] = useState(initialData?.min_price?.toString() || "");
   const [condition, setCondition] = useState<ListingCondition>(initialData?.condition || "good");
   const [location, setLocation] = useState(initialData?.location || "");
+  const [sellerNotes, setSellerNotes] = useState(initialData?.seller_notes || "");
   const [images, setImages] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -61,6 +74,8 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
         throw new Error("Please enter a valid price");
       }
 
+      const minPriceValue = minPrice ? parseFloat(minPrice) : undefined;
+
       if (listingId) {
         await api.listings.update(listingId, {
           title,
@@ -68,6 +83,8 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
           price: priceValue,
           condition,
           location: location || undefined,
+          min_price: minPriceValue,
+          seller_notes: sellerNotes || undefined,
           images,
         });
       } else {
@@ -77,11 +94,17 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
           price: priceValue,
           condition,
           location: location || undefined,
+          min_price: minPriceValue,
+          seller_notes: sellerNotes || undefined,
           images,
         });
       }
 
-      router.push("/dashboard");
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        router.push("/home");
+      }
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -93,14 +116,14 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+        <h2 className="font-bold text-lg">
           {listingId ? "Edit Listing" : "Create New Listing"}
         </h2>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm">
+            <div className="p-4 bg-primary/10 border-2 border-ink text-primary font-bold text-sm">
               {error}
             </div>
           )}
@@ -109,7 +132,7 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
             label="Title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Enter listing title"
+            placeholder="What are you selling?"
             required
           />
 
@@ -122,31 +145,47 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
             required
           />
 
-          <Input
-            label="Price"
-            type="number"
-            step="0.01"
-            min="0.01"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="0.00"
-            required
-          />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Price"
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="0.00"
+              required
+            />
+            <Input
+              label="Min Price"
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={minPrice}
+              onChange={(e) => setMinPrice(e.target.value)}
+              placeholder="Lowest you'll accept"
+            />
+          </div>
 
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Condition
-            </label>
-            <select
-              value={condition}
-              onChange={(e) => setCondition(e.target.value as ListingCondition)}
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
-            >
-              <option value="new">New</option>
-              <option value="like_new">Like New</option>
-              <option value="good">Good</option>
-              <option value="fair">Fair</option>
-            </select>
+          {/* Condition Button Group */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-bold text-ink">Condition</label>
+            <div className="flex gap-0">
+              {CONDITIONS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setCondition(c.value)}
+                  className={`flex-1 px-3 py-2.5 text-sm font-bold border-2 border-ink transition-all -ml-0.5 first:ml-0 ${
+                    condition === c.value
+                      ? "bg-secondary text-white neo-shadow-sm z-10 relative"
+                      : "bg-surface text-ink hover:bg-cream"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <Input
@@ -157,39 +196,46 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
             required
           />
 
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Images
-            </label>
+          <Textarea
+            label="Notes for AI Negotiator"
+            value={sellerNotes}
+            onChange={(e) => setSellerNotes(e.target.value)}
+            placeholder="Private notes the AI will use when negotiating (e.g. 'firm on price', 'willing to include accessories')"
+            rows={3}
+          />
+
+          {/* Dropzone */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-bold text-ink">Images</label>
             <div
               {...getRootProps()}
-              className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+              className={`border-2 border-dashed p-8 text-center cursor-pointer transition-all ${
                 isDragActive
-                  ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                  : "border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600"
+                  ? "border-secondary bg-secondary/10"
+                  : "border-ink/30 hover:border-ink/60"
               }`}
             >
               <input {...getInputProps()} />
-              <p className="text-gray-600 dark:text-gray-400">
+              <p className="text-ink/50 font-medium">
                 {isDragActive
                   ? "Drop images here..."
-                  : "Drag and drop images, or click to select"}
+                  : "Drag & drop images, or click to select"}
               </p>
             </div>
 
             {previews.length > 0 && (
-              <div className="grid grid-cols-4 gap-4 mt-4">
+              <div className="grid grid-cols-4 gap-3 mt-3">
                 {previews.map((preview, index) => (
-                  <div key={index} className="relative aspect-square">
+                  <div key={index} className="relative aspect-square border-2 border-ink overflow-hidden">
                     <img
                       src={preview}
                       alt={`Preview ${index + 1}`}
-                      className="w-full h-full object-cover rounded-lg"
+                      className="w-full h-full object-cover"
                     />
                     <button
                       type="button"
                       onClick={() => removeImage(index)}
-                      className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-sm hover:bg-red-600"
+                      className="absolute top-1 right-1 w-6 h-6 bg-primary text-white border border-ink flex items-center justify-center text-xs font-bold hover:bg-primary/80"
                     >
                       x
                     </button>
@@ -203,11 +249,7 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
             <Button type="submit" disabled={loading}>
               {loading ? "Saving..." : listingId ? "Update Listing" : "Create Listing"}
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => router.back()}
-            >
+            <Button type="button" variant="ghost" onClick={() => (onCancel ? onCancel() : router.back())}>
               Cancel
             </Button>
           </div>

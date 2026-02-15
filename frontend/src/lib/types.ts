@@ -14,8 +14,12 @@ export interface Listing {
   title: string;
   description: string;
   price: number;
+  min_price: number | null;
+  willing_to_negotiate: number;
+  seller_notes: string | null;
   condition: ListingCondition;
   location: string | null;
+  status: string;
   created_at: string;
   updated_at: string;
   images: ListingImage[];
@@ -74,4 +78,55 @@ export interface Transaction {
   refunded_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/* ── Messaging / Conversations ───────────────────── */
+
+export interface Buyer {
+  id: number;
+  fb_name: string;
+  fb_profile_url: string | null;
+  created_at: string;
+}
+
+export interface Message {
+  id: number;
+  conversation_id: number;
+  role: string;
+  content: string;
+  sent_at: string;
+  delivered: boolean;
+}
+
+export interface Conversation {
+  id: number;
+  buyer_id: number;
+  listing_id: number | null;
+  fb_thread_id: string | null;
+  status: string;
+  agreed_price: number | null;
+  current_offer: number | null;
+  delivery_address: string | null;
+  last_message_at: string | null;
+  created_at: string;
+}
+
+export interface ConversationDetail extends Conversation {
+  buyer: Buyer;
+  messages: Message[];
+  listing?: {
+    id: number;
+    title: string;
+    price: number;
+    min_price: number | null;
+    status: string;
+  };
+}
+
+export interface DashboardStats {
+  total_conversations: number;
+  active_conversations: number;
+  sold_conversations: number;
+  total_messages: number;
+  total_buyers: number;
 }

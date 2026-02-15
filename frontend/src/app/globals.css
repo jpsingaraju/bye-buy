@@ -1,26 +1,164 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-cream: #FFFBF0;
+  --color-surface: #FFFFFF;
+  --color-ink: #1A1A2E;
+  --color-primary: #FF5484;
+  --color-secondary: #5B4CFF;
+  --color-yellow: #FFD23F;
+  --color-green: #3CEFB0;
+  --color-orange: #FF9F43;
+  --color-sky: #4CC9F0;
+  --color-muted: #9CA3AF;
+
+  --font-sans: var(--font-space-grotesk);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.font-wordmark {
+  font-family: var(--font-wordmark), cursive;
 }
 
+/* ── Base ────────────────────────────────────────── */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: var(--color-yellow);
+  color: var(--color-ink);
+}
+
+/* ── Neobrutalism Utilities ──────────────────────── */
+.neo-border {
+  border: 2px solid var(--color-ink);
+}
+
+.neo-shadow {
+  box-shadow: 4px 4px 0px var(--color-ink);
+}
+
+.neo-shadow-sm {
+  box-shadow: 2px 2px 0px var(--color-ink);
+}
+
+.neo-shadow-lg {
+  box-shadow: 6px 6px 0px var(--color-ink);
+}
+
+.neo-hover {
+  transition: all 150ms ease;
+}
+
+.neo-hover:hover {
+  box-shadow: 6px 6px 0px var(--color-ink);
+  transform: translate(-2px, -2px);
+}
+
+.neo-hover:active {
+  box-shadow: 2px 2px 0px var(--color-ink);
+  transform: translate(1px, 1px);
+}
+
+/* ── Keyframe Animations ─────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-2deg); }
+  75% { transform: rotate(2deg); }
+}
+
+@keyframes flow-dot {
+  0% { offset-distance: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes dash-flow {
+  to { stroke-dashoffset: -20; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes confetti-fall {
+  0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100px) rotate(720deg); opacity: 0; }
+}
+
+/* ── Animation Utility Classes ───────────────────── */
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.5s ease-out forwards;
+}
+
+.animate-ticker {
+  animation: ticker-scroll 30s linear infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-wiggle {
+  animation: wiggle 2s ease-in-out infinite;
+}
+
+.animate-dash-flow {
+  animation: dash-flow 0.8s linear infinite;
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 8s ease infinite;
+}
+
+/* ── SVG Flow Dots ───────────────────────────────── */
+.flow-dot {
+  animation: flow-dot 3s linear infinite;
+}
+
+/* ── Scrollbar Styling ───────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-cream);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink);
+  border: 1px solid var(--color-cream);
 }
