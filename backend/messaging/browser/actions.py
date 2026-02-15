@@ -121,7 +121,7 @@ async def send_message(session, message: str, buyer_name: str = "", max_attempts
             await session.act(
                 input="Press the Enter key to send the message that was just typed.",
             )
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(3)
 
             # Verify: extract messages and check if ours appears
             verified = await _verify_message_sent(session, message, buyer_name)

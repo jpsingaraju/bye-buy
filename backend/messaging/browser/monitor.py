@@ -652,7 +652,10 @@ class MessageMonitor:
             delivered=sent,
         )
 
-        logger.info(f"Thank-you message sent to {buyer_name}")
+        if sent:
+            logger.info(f"Thank-you message sent to {buyer_name}")
+        else:
+            logger.warning(f"Thank-you message FAILED to send to {buyer_name} (session may have expired)")
         return "sold"
 
 
