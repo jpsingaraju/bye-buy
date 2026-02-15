@@ -80,15 +80,21 @@ async def main():
     env_path = Path(__file__).parent / ".env"
     try:
         with open(env_path, "r") as f:
-            content = f.read()
+            lines = f.readlines()
 
-        content = content.replace(
-            "BROWSERBASE_CONTEXT_ID=",
-            f"BROWSERBASE_CONTEXT_ID={context_id}"
-        )
+        import re
+        updated = False
+        for i, line in enumerate(lines):
+            if re.match(r"^BROWSERBASE_CONTEXT_ID=", line):
+                lines[i] = f"BROWSERBASE_CONTEXT_ID={context_id}\n"
+                updated = True
+                break
+
+        if not updated:
+            lines.append(f"BROWSERBASE_CONTEXT_ID={context_id}\n")
 
         with open(env_path, "w") as f:
-            f.write(content)
+            f.writelines(lines)
 
         print(f"\n.env file updated automatically!")
     except Exception as e:

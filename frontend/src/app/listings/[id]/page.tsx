@@ -143,8 +143,8 @@ function PhotoCarousel({ images, title }: { images: { id: number; filepath: stri
   );
 }
 
-/* ── Chat Card Component ──────────────────────────── */
-function ChatCard({ chat, isDemo }: {
+/* ── Chat Card Component (dummy conversations) ───── */
+function ChatCard({ chat }: {
   chat: typeof DUMMY_CONVOS[0];
   isDemo: boolean;
 }) {
@@ -152,50 +152,114 @@ function ChatCard({ chat, isDemo }: {
   const lastMsg = chat.messages[chat.messages.length - 1];
 
   return (
+    <ChatCardShell
+      buyerName={chat.buyerName}
+      status={chat.agreedPrice ? "agreed" : chat.status}
+      offer={chat.offer}
+      lastMessage={lastMsg?.content}
+      expanded={expanded}
+      onToggle={() => setExpanded(!expanded)}
+    >
+      {chat.messages.map((msg, i) => (
+        <div key={i} className={`flex ${msg.role === "seller" ? "justify-end" : "justify-start"}`}>
+          <div className={`max-w-[75%] px-3 py-2 border-2 border-ink ${
+            msg.role === "seller" ? "bg-primary/10" : "bg-surface"
+          }`}>
+            <span className={`text-[10px] font-bold block mb-0.5 ${
+              msg.role === "seller" ? "text-primary" : "text-ink/40"
+            }`}>
+              {msg.role === "seller" ? "AI Agent" : chat.buyerName}
+            </span>
+            <p className="text-sm text-ink leading-snug">{msg.content}</p>
+            <span className="block text-[9px] text-ink/30 mt-1">{msg.time}</span>
+          </div>
+        </div>
+      ))}
+    </ChatCardShell>
+  );
+}
+
+/* ── Real Chat Card (fetches message history) ──────── */
+function RealChatCard({ conversation }: { conversation: Conversation }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: detail } = useSWR(
+    expanded ? `/conversations/${conversation.id}` : null,
+    () => api.conversations.get(conversation.id),
+  );
+
+  const buyerName = detail?.buyer?.fb_name || `Buyer #${conversation.buyer_id}`;
+  const offer = conversation.current_offer ?? conversation.agreed_price ?? 0;
+  const messages = detail?.messages || [];
+  const lastMsg = messages.length > 0
+    ? messages[messages.length - 1].content
+    : conversation.last_message_at ? `Last active ${timeAgo(conversation.last_message_at)}` : "No messages yet";
+
+  return (
+    <ChatCardShell
+      buyerName={buyerName}
+      status={conversation.agreed_price ? "agreed" : conversation.status}
+      offer={offer}
+      lastMessage={lastMsg}
+      expanded={expanded}
+      onToggle={() => setExpanded(!expanded)}
+    >
+      {messages.length === 0 && expanded ? (
+        <p className="text-xs text-ink/40 font-medium py-2">Loading messages...</p>
+      ) : (
+        messages.map((msg) => (
+          <div key={msg.id} className={`flex ${msg.role === "seller" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[75%] px-3 py-2 border-2 border-ink ${
+              msg.role === "seller" ? "bg-primary/10" : "bg-surface"
+            }`}>
+              <span className={`text-[10px] font-bold block mb-0.5 ${
+                msg.role === "seller" ? "text-primary" : "text-ink/40"
+              }`}>
+                {msg.role === "seller" ? "AI Agent" : buyerName}
+              </span>
+              <p className="text-sm text-ink leading-snug">{msg.content}</p>
+              <span className="block text-[9px] text-ink/30 mt-1">{timeAgo(msg.sent_at)}</span>
+            </div>
+          </div>
+        ))
+      )}
+    </ChatCardShell>
+  );
+}
+
+/* ── Shared Chat Card Shell ───────────────────────── */
+function ChatCardShell({ buyerName, status, offer, lastMessage, expanded, onToggle, children }: {
+  buyerName: string; status: string; offer: number; lastMessage: string;
+  expanded: boolean; onToggle: () => void; children: React.ReactNode;
+}) {
+  return (
     <Card className="overflow-hidden">
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={onToggle}
         className="w-full text-left px-4 py-3 flex items-center justify-between hover:bg-primary/5 transition-colors"
       >
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-9 h-9 bg-primary/10 border-2 border-ink flex items-center justify-center shrink-0">
-            <span className="text-xs font-black text-primary">{chat.buyerName.charAt(0)}</span>
+            <span className="text-xs font-black text-primary">{buyerName.charAt(0)}</span>
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p className="font-bold text-sm text-ink">{chat.buyerName}</p>
-              <StatusBadge status={chat.agreedPrice ? "agreed" : chat.status} />
+              <p className="font-bold text-sm text-ink">{buyerName}</p>
+              <StatusBadge status={status} />
             </div>
             <p className="text-xs text-ink/40 font-medium truncate">
-              {lastMsg?.content}
+              {lastMessage}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-3">
-          <span className="font-black text-sm text-primary">${chat.offer}</span>
+          <span className="font-black text-sm text-primary">${offer}</span>
           <span className="text-ink/30 text-xs">{expanded ? "▲" : "▼"}</span>
         </div>
       </button>
 
       {expanded && (
         <div className="border-t-2 border-ink/10 px-4 py-3 space-y-2.5 max-h-72 overflow-y-auto bg-cream/30">
-          {chat.messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === "seller" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[75%] px-3 py-2 border-2 border-ink ${
-                msg.role === "seller"
-                  ? "bg-primary/10"
-                  : "bg-surface"
-              }`}>
-                <span className={`text-[10px] font-bold block mb-0.5 ${
-                  msg.role === "seller" ? "text-primary" : "text-ink/40"
-                }`}>
-                  {msg.role === "seller" ? "AI Agent" : chat.buyerName}
-                </span>
-                <p className="text-sm text-ink leading-snug">{msg.content}</p>
-                <span className="block text-[9px] text-ink/30 mt-1">{msg.time}</span>
-              </div>
-            </div>
-          ))}
+          {children}
         </div>
       )}
     </Card>
@@ -233,13 +297,6 @@ export default function ListingDetailPage({
 
   const convos = conversations || [];
   const isDemo = convos.length === 0;
-  const chatData = isDemo ? DUMMY_CONVOS : convos.map((c) => ({
-    buyerName: `Buyer #${c.buyer_id}`,
-    status: c.status,
-    offer: c.current_offer ?? c.agreed_price ?? 0,
-    agreedPrice: c.agreed_price,
-    messages: [{ role: "buyer", content: "Conversation active", time: c.last_message_at ? timeAgo(c.last_message_at) : "—" }],
-  }));
 
   const offers = isDemo
     ? DUMMY_CONVOS.map((c) => c.offer)
@@ -313,9 +370,14 @@ export default function ListingDetailPage({
               Conversations
             </h2>
             <div className="space-y-2">
-              {chatData.map((chat, i) => (
-                <ChatCard key={i} chat={chat} isDemo={isDemo} />
-              ))}
+              {isDemo
+                ? DUMMY_CONVOS.map((chat, i) => (
+                    <ChatCard key={i} chat={chat} isDemo={true} />
+                  ))
+                : convos.map((c) => (
+                    <RealChatCard key={c.id} conversation={c} />
+                  ))
+              }
             </div>
           </div>
         </div>
