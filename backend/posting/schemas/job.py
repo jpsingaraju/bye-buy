@@ -3,11 +3,11 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 
-VALID_PLATFORMS = {"facebook_marketplace", "ebay", "craigslist"}
+VALID_PLATFORMS = {"facebook_marketplace", "ebay", "craigslist", "mercari"}
 
 
 class PostingJobCreate(BaseModel):
-    platform: str = Field(..., pattern="^(facebook_marketplace|ebay|craigslist)$")
+    platform: str = Field(..., pattern="^(facebook_marketplace|ebay|craigslist|mercari)$")
 
 
 class BatchPostingJobCreate(BaseModel):
