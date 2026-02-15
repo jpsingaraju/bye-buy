@@ -35,6 +35,16 @@ export function Header() {
               >
                 New Listing
               </Link>
+              <Link
+                href="/transactions"
+                className={`text-sm font-medium transition-colors ${
+                  pathname === "/transactions"
+                    ? "text-blue-600 dark:text-blue-400"
+                    : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                }`}
+              >
+                Transactions
+              </Link>
             </nav>
           </div>
         </div>

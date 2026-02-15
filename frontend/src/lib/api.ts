@@ -1,6 +1,7 @@
-import { Listing, PostingJob, Platform } from "./types";
+import { Listing, ListingCondition, PostingJob, Platform, Transaction } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const MESSAGING_API_BASE = process.env.NEXT_PUBLIC_MESSAGING_API_URL || "http://localhost:8001";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -11,9 +12,10 @@ class ApiError extends Error {
 
 async function fetchApi<T>(
   endpoint: string,
-  options?: RequestInit
+  options?: RequestInit,
+  baseUrl: string = API_BASE
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  const res = await fetch(`${baseUrl}${endpoint}`, {
     ...options,
     headers: {
       ...options?.headers,
@@ -38,12 +40,16 @@ export const api = {
       title: string;
       description: string;
       price: number;
+      condition: ListingCondition;
+      location?: string;
       images: File[];
     }) => {
       const formData = new FormData();
       formData.append("title", data.title);
       formData.append("description", data.description);
       formData.append("price", data.price.toString());
+      formData.append("condition", data.condition);
+      if (data.location) formData.append("location", data.location);
       data.images.forEach((file) => formData.append("images", file));
 
       return fetchApi<Listing>("/api/listings", {
@@ -58,6 +64,8 @@ export const api = {
         title?: string;
         description?: string;
         price?: number;
+        condition?: ListingCondition;
+        location?: string;
         images?: File[];
       }
     ) => {
@@ -65,6 +73,8 @@ export const api = {
       if (data.title) formData.append("title", data.title);
       if (data.description) formData.append("description", data.description);
       if (data.price) formData.append("price", data.price.toString());
+      if (data.condition) formData.append("condition", data.condition);
+      if (data.location) formData.append("location", data.location);
       data.images?.forEach((file) => formData.append("images", file));
 
       return fetchApi<Listing>(`/api/listings/${id}`, {
@@ -83,6 +93,13 @@ export const api = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platform }),
+      }),
+
+    postBatch: (id: number, platforms: Platform[]) =>
+      fetchApi<PostingJob[]>(`/api/listings/${id}/post-batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platforms }),
       }),
   },
 
@@ -108,5 +125,27 @@ export const api = {
   getImageUrl: (filepath: string) => {
     const filename = filepath.split("/").pop();
     return `${API_BASE}/uploads/${filename}`;
+  },
+
+  payments: {
+    listTransactions: () =>
+      fetchApi<Transaction[]>("/payments/transactions", undefined, MESSAGING_API_BASE),
+
+    getTransaction: (id: number) =>
+      fetchApi<Transaction>(`/payments/transactions/${id}`, undefined, MESSAGING_API_BASE),
+
+    addTracking: (id: number, trackingNumber: string) =>
+      fetchApi<Transaction>(`/payments/transactions/${id}/tracking`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tracking_number: trackingNumber }),
+      }, MESSAGING_API_BASE),
+
+    createCheckout: (conversationId: number) =>
+      fetchApi<{ checkout_url: string; transaction_id: number }>(
+        `/payments/checkout/${conversationId}`,
+        { method: "POST" },
+        MESSAGING_API_BASE,
+      ),
   },
 };

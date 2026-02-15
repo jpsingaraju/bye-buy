@@ -19,7 +19,9 @@ export default function ListingDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const [posting, setPosting] = useState(false);
-  const [selectedPlatform, setSelectedPlatform] = useState<Platform>("facebook_marketplace");
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Set<Platform>>(
+    new Set(["facebook_marketplace", "craigslist"])
+  );
 
   const { data: listing, error: listingError, mutate: mutateListing } = useSWR(
     `/api/listings/${id}`,
@@ -53,10 +55,28 @@ export default function ListingDetailPage({
     );
   }
 
+  const togglePlatform = (platform: Platform) => {
+    setSelectedPlatforms((prev) => {
+      const next = new Set(prev);
+      if (next.has(platform)) {
+        next.delete(platform);
+      } else {
+        next.add(platform);
+      }
+      return next;
+    });
+  };
+
   const handlePost = async () => {
+    if (selectedPlatforms.size === 0) return;
     setPosting(true);
     try {
-      await api.listings.post(listing.id, selectedPlatform);
+      const platforms = Array.from(selectedPlatforms);
+      if (platforms.length === 1) {
+        await api.listings.post(listing.id, platforms[0]);
+      } else {
+        await api.listings.postBatch(listing.id, platforms);
+      }
       mutateJobs();
     } catch (err) {
       console.error("Failed to post listing:", err);
@@ -88,6 +108,7 @@ export default function ListingDetailPage({
     facebook_marketplace: "Facebook Marketplace",
     ebay: "eBay",
     craigslist: "Craigslist",
+    mercari: "Mercari",
   };
 
   return (
@@ -160,17 +181,37 @@ export default function ListingDetailPage({
               </h2>
             </CardHeader>
             <CardContent className="space-y-4">
-              <select
-                value={selectedPlatform}
-                onChange={(e) => setSelectedPlatform(e.target.value as Platform)}
-                className="block w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-2 text-gray-900 dark:text-gray-100"
+              <div className="space-y-3">
+                {(
+                  [
+                    ["facebook_marketplace", "Facebook Marketplace"],
+                    ["craigslist", "Craigslist"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <label
+                    key={value}
+                    className="flex items-center gap-3 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedPlatforms.has(value)}
+                      onChange={() => togglePlatform(value)}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-gray-900 dark:text-gray-100">
+                      {label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <Button
+                onClick={handlePost}
+                disabled={posting || selectedPlatforms.size === 0}
+                className="w-full"
               >
-                <option value="facebook_marketplace">Facebook Marketplace</option>
-                <option value="ebay">eBay</option>
-                <option value="craigslist">Craigslist</option>
-              </select>
-              <Button onClick={handlePost} disabled={posting} className="w-full">
-                {posting ? "Posting..." : "Post Listing"}
+                {posting
+                  ? "Posting..."
+                  : `Post to ${selectedPlatforms.size} Platform${selectedPlatforms.size !== 1 ? "s" : ""}`}
               </Button>
             </CardContent>
           </Card>

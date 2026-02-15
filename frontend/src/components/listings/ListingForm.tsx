@@ -7,12 +7,15 @@ import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { api } from "@/lib/api";
+import { ListingCondition } from "@/lib/types";
 
 interface ListingFormProps {
   initialData?: {
     title: string;
     description: string;
     price: number;
+    condition?: ListingCondition;
+    location?: string;
   };
   listingId?: number;
 }
@@ -22,6 +25,8 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
   const [title, setTitle] = useState(initialData?.title || "");
   const [description, setDescription] = useState(initialData?.description || "");
   const [price, setPrice] = useState(initialData?.price?.toString() || "");
+  const [condition, setCondition] = useState<ListingCondition>(initialData?.condition || "good");
+  const [location, setLocation] = useState(initialData?.location || "");
   const [images, setImages] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -61,6 +66,8 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
           title,
           description,
           price: priceValue,
+          condition,
+          location: location || undefined,
           images,
         });
       } else {
@@ -68,6 +75,8 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
           title,
           description,
           price: priceValue,
+          condition,
+          location: location || undefined,
           images,
         });
       }
@@ -121,6 +130,30 @@ export function ListingForm({ initialData, listingId }: ListingFormProps) {
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             placeholder="0.00"
+            required
+          />
+
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Condition
+            </label>
+            <select
+              value={condition}
+              onChange={(e) => setCondition(e.target.value as ListingCondition)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+            >
+              <option value="new">New</option>
+              <option value="like_new">Like New</option>
+              <option value="good">Good</option>
+              <option value="fair">Fair</option>
+            </select>
+          </div>
+
+          <Input
+            label="Location"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="e.g. Seattle, WA or 98101"
             required
           />
 
