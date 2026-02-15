@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import time
 from collections import deque
 from datetime import datetime
 
@@ -17,13 +18,26 @@ from .actions import (
     click_conversation,
     send_message as browser_send_message,
     close_chat_popup,
+    close_all_chat_popups,
 )
 from ..ai.responder import generate_response
 
 logger = logging.getLogger(__name__)
 
-# Max consecutive checks with no new messages before closing a chat popup
-MAX_IDLE_CHECKS = 3
+# 2 minutes of no new buyer messages before closing popup
+INACTIVITY_TIMEOUT = 120
+
+# How often to re-extract the popup while watching (seconds)
+WATCH_INTERVAL_MIN = 5
+WATCH_INTERVAL_MAX = 10
+
+# How often to re-check inbox when no conversations (seconds)
+EMPTY_POLL_MIN = 5
+EMPTY_POLL_MAX = 10
+
+# How often to re-check inbox after handling conversations (seconds)
+ACTIVE_POLL_MIN = 30
+ACTIVE_POLL_MAX = 60
 
 
 class MessageMonitor:
@@ -58,30 +72,30 @@ class MessageMonitor:
         logger.info("Message monitor stopped")
 
     async def _run(self):
-        """Main loop with two-phase polling.
+        """Main loop: navigate to inbox, handle conversations, idle poll.
 
         - Navigate to inbox, extract conversations
-        - For each conversation: open chat popup, watch it (re-extract
-          every 2-5s since FB updates it live), respond when new messages
-          appear, close popup after MAX_IDLE_CHECKS with no new messages
-        - If a listing gets sold mid-cycle, remaining conversations for
-          that listing get a "sorry already sold" message
-        - After a sale: notify all remaining buyers, then close session
-        - If no conversations found: refresh inbox every 5-10s (idle polling)
-        - After handling conversations: refresh inbox every ~30s
+        - For each conversation: close stray popups, open chat popup,
+          keep it open and re-extract every 5-10s, respond to new messages
+        - Close popup after 2 min inactivity (no new buyer messages)
+        - After handling all conversations: wait 30-60s, refresh inbox
+        - If deal completes: notify remaining buyers, close session
         """
         while self.running:
             try:
-                deal_completed = await self._poll_cycle()
+                result = await self._poll_cycle()
                 self.cycle_count += 1
                 self.last_poll_at = datetime.utcnow()
 
-                if deal_completed:
-                    # Sale happened — session closed by _poll_cycle, reset state
+                if result == "deal_completed":
                     self._on_inbox = False
-                    logger.info("Deal completed, waiting before starting new session")
-                    await asyncio.sleep(5)
-                    continue
+                    logger.info("Deal completed, shutting down service")
+                    self.running = False
+                    # Shut down the uvicorn process
+                    import os
+                    import signal
+                    os.kill(os.getpid(), signal.SIGINT)
+                    return
 
                 # Session break every N cycles
                 if self.cycle_count % settings.session_break_cycles == 0:
@@ -91,9 +105,15 @@ class MessageMonitor:
                     )
                     logger.info(f"Session break: sleeping {break_time:.0f}s")
                     await asyncio.sleep(break_time)
+                elif result == "empty":
+                    # No conversations, check again quickly
+                    interval = random.uniform(EMPTY_POLL_MIN, EMPTY_POLL_MAX)
+                    logger.info(f"No convos, next inbox refresh in {interval:.0f}s")
+                    self._on_inbox = False
+                    await asyncio.sleep(interval)
                 else:
-                    # Refresh inbox after ~30s to check for new conversations
-                    interval = random.uniform(25, 35)
+                    # Had conversations, wait longer before next check
+                    interval = random.uniform(ACTIVE_POLL_MIN, ACTIVE_POLL_MAX)
                     logger.info(f"Next inbox refresh in {interval:.0f}s")
                     self._on_inbox = False
                     await asyncio.sleep(interval)
@@ -112,24 +132,28 @@ class MessageMonitor:
 
                 await asyncio.sleep(10)
 
-    async def _poll_cycle(self) -> bool:
-        """Single poll cycle. Returns True if a deal was completed (session closed)."""
+    async def _poll_cycle(self) -> str:
+        """Single poll cycle.
+
+        Returns:
+            "deal_completed" - a deal was completed, session closed
+            "empty" - no conversations found
+            "handled" - conversations were handled
+        """
         session = await get_stagehand_session()
 
         # Navigate to marketplace inbox
         if not self._on_inbox:
             if not await navigate_to_marketplace(session):
-                return False
+                return "empty"
             self._on_inbox = True
 
         # Extract conversation list
         conversations = await extract_conversation_list(session)
         if not conversations:
             logger.info("No conversations found, will retry soon")
-            # Idle polling — refresh quickly
             self._on_inbox = False
-            await asyncio.sleep(random.uniform(5, 10))
-            return False
+            return "empty"
 
         targets = conversations[: settings.max_conversations_per_cycle]
         logger.info(f"Checking {len(targets)} conversations")
@@ -150,85 +174,98 @@ class MessageMonitor:
                 self.recent_errors.append(error_msg)
 
         if deal_completed:
-            # All conversations processed (remaining ones got "already sold")
-            # Now close the session
             logger.info("All buyers notified, closing Browserbase session")
             await close_session()
             self._on_inbox = False
+            return "deal_completed"
 
-        return deal_completed
+        return "handled"
 
     async def _handle_conversation(
         self, browser_session, conv_preview, handled_listings: set
     ) -> str | None:
-        """Handle a single conversation with live chat watching.
+        """Handle a single conversation. Keep popup open, watch for messages.
 
-        Returns "sold" if the listing was sold, None otherwise.
+        Re-extracts every 5-10s. Closes popup after 2 min of no new buyer
+        messages, or when deal completes/fails.
+
+        Returns "sold" if listing was sold, None otherwise.
         """
         buyer_name = conv_preview.buyer_name
+
+        # Close any stray popups first
+        await close_all_chat_popups(browser_session)
 
         # Click conversation to open chat popup
         if not await click_conversation(browser_session, buyer_name):
             return None
 
-        # Watch the chat popup — re-extract every 2-5s, respond when
-        # new messages appear, bail after MAX_IDLE_CHECKS with nothing new
-        idle_checks = 0
         result = None
+        last_activity = time.time()
+        listing_key_set = False
 
-        while idle_checks < MAX_IDLE_CHECKS:
-            conv_data = await extract_chat_messages(browser_session)
+        try:
+            while True:
+                # Check inactivity timeout
+                idle_time = time.time() - last_activity
+                if idle_time >= INACTIVITY_TIMEOUT:
+                    logger.info(
+                        f"No new messages from {buyer_name} for {idle_time:.0f}s, "
+                        f"closing popup"
+                    )
+                    break
 
-            # Deduplicate by listing title
-            dedup_key = conv_data.listing_title.lower().strip()
-            if dedup_key and dedup_key in handled_listings:
+                conv_data = await extract_chat_messages(browser_session)
+
+                # Deduplicate by listing title (only check against OTHER convos)
+                dedup_key = conv_data.listing_title.lower().strip()
+                if not listing_key_set and dedup_key:
+                    if dedup_key in handled_listings:
+                        logger.info(
+                            f"Already handled '{conv_data.listing_title}' this cycle, "
+                            f"skipping {buyer_name}"
+                        )
+                        return None
+                    handled_listings.add(dedup_key)
+                    listing_key_set = True
+
                 logger.info(
-                    f"Already handled '{conv_data.listing_title}' this cycle, "
-                    f"skipping {buyer_name}"
+                    f"Chat popup for {buyer_name}: {len(conv_data.messages)} messages, "
+                    f"listing='{conv_data.listing_title}'"
                 )
+
+                if not conv_data.messages:
+                    await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
+                    continue
+
+                # Last message is from seller, waiting for buyer reply
+                if not conv_data.messages[-1].is_from_buyer:
+                    logger.info(f"Last message for {buyer_name} is from seller, waiting...")
+                    await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
+                    continue
+
+                # Process messages against DB
+                action = await self._process_messages(
+                    browser_session, buyer_name, conv_data
+                )
+
+                if action == "sold":
+                    result = "sold"
+                    break
+                elif action == "responded":
+                    last_activity = time.time()
+                    await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
+                    continue
+                else:
+                    # No new messages (all already in DB)
+                    await asyncio.sleep(random.uniform(WATCH_INTERVAL_MIN, WATCH_INTERVAL_MAX))
+                    continue
+
+        except Exception as e:
+            logger.error(f"Error in watch loop for {buyer_name}: {e}")
+        finally:
+            if result != "sold":
                 await close_chat_popup(browser_session)
-                return None
-            if dedup_key:
-                handled_listings.add(dedup_key)
-
-            logger.info(
-                f"Chat popup for {buyer_name}: {len(conv_data.messages)} messages, "
-                f"listing='{conv_data.listing_title}'"
-            )
-
-            if not conv_data.messages:
-                idle_checks += 1
-                await asyncio.sleep(random.uniform(2, 5))
-                continue
-
-            # Skip if last message is from seller — waiting for buyer reply
-            if not conv_data.messages[-1].is_from_buyer:
-                logger.info(f"Last message for {buyer_name} is from seller, waiting...")
-                idle_checks += 1
-                await asyncio.sleep(random.uniform(2, 5))
-                continue
-
-            # Process messages against DB
-            action = await self._process_messages(
-                browser_session, buyer_name, conv_data
-            )
-
-            if action == "sold":
-                result = "sold"
-                break
-            elif action == "responded":
-                # We responded — keep watching for buyer's next message
-                idle_checks = 0
-                await asyncio.sleep(random.uniform(2, 5))
-                continue
-            else:
-                # No new messages (all already in DB)
-                idle_checks += 1
-                await asyncio.sleep(random.uniform(2, 5))
-                continue
-
-        if result != "sold":
-            await close_chat_popup(browser_session)
 
         return result
 
@@ -238,9 +275,9 @@ class MessageMonitor:
         """Process extracted messages: diff against DB, generate AI response.
 
         Returns:
-            "sold" — listing was sold (address received)
-            "responded" — we sent a response to new messages
-            None — no new messages to respond to
+            "sold" - listing was sold (address received)
+            "responded" - we sent a response to new messages
+            None - no new messages to respond to
         """
         async with async_session() as db:
             buyer = await BuyerService.get_or_create(db, fb_name=buyer_name)
@@ -254,8 +291,8 @@ class MessageMonitor:
                 db, buyer_id=buyer.id, listing_id=listing_id
             )
 
-            # Skip if conversation is closed/sold
-            if conversation.status in ("closed", "sold"):
+            # Skip if listing already sold
+            if conversation.status == "sold":
                 return None
 
             # DB diff: find truly new messages
@@ -288,7 +325,7 @@ class MessageMonitor:
                     delivered=True,
                 )
 
-            # Check if listing is sold — tell buyer
+            # Check if listing is sold - tell buyer
             if listing and listing.status == "sold":
                 response_text = (
                     "ay sorry someone already grabbed this one, "
@@ -305,7 +342,6 @@ class MessageMonitor:
                 await ConversationService.update_status(
                     db, conversation.id, "closed"
                 )
-                await close_chat_popup(browser_session)
                 return None
 
             # Generate AI response
@@ -379,7 +415,6 @@ class MessageMonitor:
                         listing.status = "sold"
                         await db.commit()
 
-                    await close_chat_popup(browser_session)
                     return "sold"
                 else:
                     logger.warning(

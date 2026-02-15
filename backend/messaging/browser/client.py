@@ -37,7 +37,8 @@ async def get_stagehand_session():
                     "persist": True,
                 },
                 "solve_captchas": True,
-            }
+            },
+            "timeout": 600,
         }
 
     _session = await _client.sessions.start(**session_params)

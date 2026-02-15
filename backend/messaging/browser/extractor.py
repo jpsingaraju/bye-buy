@@ -46,57 +46,71 @@ class ConversationData:
     messages: list[ExtractedMessage] = field(default_factory=list)
 
 
-async def extract_conversation_list(session) -> list[ConversationPreview]:
-    """Extract the list of conversations from the Facebook Marketplace inbox."""
-    try:
-        result = await session.extract(
-            instruction=(
-                "Extract ONLY the conversations that are literally visible on screen "
-                "in the Facebook Marketplace inbox list. Do NOT make up or fabricate "
-                "any names, titles, or text. If you cannot read a name clearly, skip "
-                "that conversation. For each conversation get: the buyer's name, "
-                "the listing/item title, and the message preview text."
-            ),
-            schema={
-                "type": "object",
-                "properties": {
-                    "conversations": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "buyer_name": {"type": "string"},
-                                "listing_title": {"type": "string"},
-                                "preview_text": {"type": "string"},
+async def extract_conversation_list(session, max_retries: int = 3) -> list[ConversationPreview]:
+    """Extract the list of conversations from the Facebook Marketplace inbox.
+
+    Retries extraction a few times if the list comes back empty,
+    since Facebook's inbox can take a moment to render.
+    """
+    import asyncio
+
+    for attempt in range(max_retries):
+        try:
+            result = await session.extract(
+                instruction=(
+                    "Extract ONLY the conversations that are literally visible on screen "
+                    "in the Facebook Marketplace inbox list. Do NOT make up or fabricate "
+                    "any names, titles, or text. If you cannot read a name clearly, skip "
+                    "that conversation. For each conversation get: the buyer's name, "
+                    "the listing/item title, and the message preview text."
+                ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "conversations": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "buyer_name": {"type": "string"},
+                                    "listing_title": {"type": "string"},
+                                    "preview_text": {"type": "string"},
+                                },
                             },
-                        },
-                    }
+                        }
+                    },
                 },
-            },
-        )
-
-        data = result.data if hasattr(result, "data") else result
-        # Unwrap Data object: data.result contains the actual dict
-        if hasattr(data, "result"):
-            data = data.result
-        logger.info(f"Raw extract result: {data}")
-        conversations_raw = (
-            data.get("conversations", []) if isinstance(data, dict) else []
-        )
-
-        convos = [
-            ConversationPreview(
-                buyer_name=c.get("buyer_name", "Unknown"),
-                listing_title=c.get("listing_title", ""),
-                preview_text=c.get("preview_text", ""),
             )
-            for c in conversations_raw
-        ]
-        logger.info(f"Extracted {len(convos)} conversations")
-        return convos
-    except Exception as e:
-        logger.error(f"Failed to extract conversation list: {e}")
-        return []
+
+            data = result.data if hasattr(result, "data") else result
+            # Unwrap Data object: data.result contains the actual dict
+            if hasattr(data, "result"):
+                data = data.result
+            logger.info(f"Raw extract result: {data}")
+            conversations_raw = (
+                data.get("conversations", []) if isinstance(data, dict) else []
+            )
+
+            if not conversations_raw and attempt < max_retries - 1:
+                logger.info(f"No conversations found (attempt {attempt + 1}/{max_retries}), waiting for inbox to load...")
+                await asyncio.sleep(3)
+                continue
+
+            convos = [
+                ConversationPreview(
+                    buyer_name=c.get("buyer_name", "Unknown"),
+                    listing_title=c.get("listing_title", ""),
+                    preview_text=c.get("preview_text", ""),
+                )
+                for c in conversations_raw
+            ]
+            logger.info(f"Extracted {len(convos)} conversations")
+            return convos
+        except Exception as e:
+            logger.error(f"Failed to extract conversation list: {e}")
+            return []
+
+    return []
 
 
 async def extract_chat_messages(session) -> ConversationData:

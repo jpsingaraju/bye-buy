@@ -7,6 +7,18 @@ logger = logging.getLogger(__name__)
 MARKETPLACE_INBOX_URL = "https://www.facebook.com/marketplace/inbox"
 
 
+def _unwrap_yes_no(result) -> str:
+    """Unwrap a yes/no extract result into a lowercase string."""
+    data = result.data if hasattr(result, "data") else result
+    if hasattr(data, "result"):
+        data = data.result
+    if isinstance(data, dict):
+        for key in ("popups_open", "popup_open"):
+            if key in data:
+                return str(data[key]).lower()
+    return str(data).lower()
+
+
 async def navigate_to_marketplace(session) -> bool:
     """Navigate to Facebook Marketplace inbox."""
     try:
@@ -37,10 +49,36 @@ async def _activate_chat_system(session) -> None:
         logger.warning(f"Failed to activate chat system: {e}")
 
 
+async def close_all_chat_popups(session) -> bool:
+    """Close all open chat popups. Safe to call when none are open."""
+    try:
+        result = await session.extract(
+            instruction="Are there any chat popups open in the bottom right corner of the screen? Answer 'yes' or 'no'.",
+            schema={
+                "type": "object",
+                "properties": {"popups_open": {"type": "string"}},
+                "required": ["popups_open"],
+            },
+        )
+        if "no" in _unwrap_yes_no(result):
+            return True
+
+        logger.info("Closing all open chat popups...")
+        await session.act(
+            input="Close ALL chat popups that are open at the bottom of the screen by clicking the X button on each one.",
+        )
+        await asyncio.sleep(1)
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to close all chat popups: {e}")
+        return False
+
+
 async def click_conversation(session, buyer_name: str) -> bool:
     """Click on a conversation in the Marketplace inbox.
     This opens a chat popup in the bottom right corner.
-    If the popup doesn't open, activates the chat system and retries."""
+    If the popup doesn't open, activates the chat system and retries.
+    Returns False if popup never opens."""
     try:
         logger.info(f"Clicking conversation for '{buyer_name}'...")
 
@@ -58,9 +96,13 @@ async def click_conversation(session, buyer_name: str) -> bool:
         try:
             result = await session.extract(
                 instruction="Is there a chat popup open in the bottom right corner of the screen? Answer with just 'yes' or 'no'.",
-                schema={"type": "object", "properties": {"popup_open": {"type": "string"}}, "required": ["popup_open"]},
+                schema={
+                    "type": "object",
+                    "properties": {"popup_open": {"type": "string"}},
+                    "required": ["popup_open"],
+                },
             )
-            popup_open = result.data.get("popup_open", "").lower() if hasattr(result, 'data') and isinstance(result.data, dict) else str(result.data).lower()
+            popup_open = _unwrap_yes_no(result)
         except Exception:
             popup_open = "yes"  # assume it worked if we can't check
 
@@ -78,6 +120,22 @@ async def click_conversation(session, buyer_name: str) -> bool:
                 ),
             )
             await asyncio.sleep(2)
+
+            # Verify popup opened after retry
+            try:
+                result = await session.extract(
+                    instruction="Is there a chat popup open in the bottom right corner of the screen? Answer with just 'yes' or 'no'.",
+                    schema={
+                        "type": "object",
+                        "properties": {"popup_open": {"type": "string"}},
+                        "required": ["popup_open"],
+                    },
+                )
+                if "no" in _unwrap_yes_no(result):
+                    logger.error(f"Popup still didn't open for {buyer_name} after retry")
+                    return False
+            except Exception:
+                pass  # assume it worked
 
         logger.info(f"Clicked conversation for '{buyer_name}'")
         return True
@@ -114,12 +172,32 @@ async def send_message(session, message: str) -> bool:
 
 
 async def close_chat_popup(session) -> bool:
-    """Close the chat popup."""
+    """Close the chat popup with verification and retry."""
     try:
         await session.act(
             input="Click the X or close button on the chat popup header to close it.",
         )
         await asyncio.sleep(1)
+
+        # Verify popup closed
+        try:
+            result = await session.extract(
+                instruction="Is there a chat popup open in the bottom right corner of the screen? Answer with just 'yes' or 'no'.",
+                schema={
+                    "type": "object",
+                    "properties": {"popup_open": {"type": "string"}},
+                    "required": ["popup_open"],
+                },
+            )
+            if "yes" in _unwrap_yes_no(result):
+                logger.warning("Popup still open after close, retrying...")
+                await session.act(
+                    input="Click the X or close button on the chat popup to close it.",
+                )
+                await asyncio.sleep(1)
+        except Exception:
+            pass  # verification failed, assume it closed
+
         return True
     except Exception as e:
         logger.error(f"Failed to close chat popup: {e}")
