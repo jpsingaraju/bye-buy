@@ -12,6 +12,7 @@ from .services.payment_worker import payment_worker
 
 # Import models so they register with Base
 from . import models  # noqa: F401
+from posting import models as _posting_models  # noqa: F401
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
